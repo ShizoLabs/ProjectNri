@@ -6,4 +6,7 @@
  */
 import './styles/app.css';
 
-console.log('This log comes from assets/app.js - welcome to AssetMapper! 🎉');
+$(document).ready(function() {
+    console.log('jQuery is loaded!');
+    $('body').append('<p>jQuery works via CDN!</p>');
+});
