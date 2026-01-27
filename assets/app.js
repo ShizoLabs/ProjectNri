@@ -7,6 +7,5 @@
 import './styles/app.css';
 
 $(document).ready(function() {
-    console.log('jQuery is loaded!');
-    $('body').append('<p>jQuery works via CDN!</p>');
+
 });
