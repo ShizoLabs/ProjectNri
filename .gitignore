@@ -7,9 +7,19 @@
 /public/bundles/
 /var/
 /vendor/
+*.DS_Store
+._*
 ###< symfony/framework-bundle ###
 
 ###> symfony/asset-mapper ###
 /public/assets/
 /assets/vendor/
 ###< symfony/asset-mapper ###
+
+###mac
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.DS_Store
+###mac

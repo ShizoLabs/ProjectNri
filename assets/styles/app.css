@@ -1,6 +1,7 @@
 html {
     font-family: "Oswald", sans-serif;
     font-size: 10px;
+    color: #edece4;
 }
 
 * {
@@ -97,7 +98,7 @@ button::-moz-focus-inner {
 }
 
 label {
-    cursor: pointer;
+    cursor: default;
 }
 
 legend {
@@ -109,60 +110,108 @@ input[type='file'] {
 }
 
 body {
-    background-color: rgb(177, 196, 196);
+    background-color: #181617;
     line-height: 1.5;
 }
 
 .header {
-
-    background-color: beige;
-    padding: 2rem;
-    margin: 1rem;
+    padding: 1rem;
+    margin: 0 4rem;
     align-items: center;
-    height: 8rem;
+    height: 20rem;
     display: flex;
-    border-bottom: .3rem solid black;
 }
-
 
 .navbar {
     display: flex;
     flex: 1;
     align-items: center;
-    height: 8rem;
 }
 
 .navbar>.logo {
     flex-grow: 1;
 }
 
-.navigation {
-    background-color: bisque;
-}
-
 .navbar a {
+    color: #edece4;
     padding: 0 1rem 0 1rem;
-
-    background-color: aquamarine;
-    color: black;
     font-size: 2.5rem;
     font-weight: 600;
     margin: 3rem;
 }
 
 .navbar a:hover {
-    border-right: .3rem dotted black;
-    border-left: .3rem solid black;
+    border-right: .3rem dotted #edece4;
+    border-left: .3rem dashed #edece4;
     -webkit-transition: all;
-    -webkit-transition-duration: 200ms;
+    -webkit-transition-duration: 250ms;
 }
+
+.logo>#phrase {
+    font-weight: 800;
+    align-items: center;
+    font-size: 6rem;
+    border-right: .3rem solid #edece4;
+    border-right-width: 100%;
+}
+
+.logo {
+    display: flex;
+    align-items: center;
+}
+
+.logo>#disc {
+    margin: 2rem;
+    font-weight: 500;
+    align-items: center;
+    font-size: 3rem;
+    border-right-width: 100%;
+}
+
 
 .logo img {
-    width: 8rem;
-    height: 8rem;
+    margin: 2rem 2rem 2rem 0;
+    width: 15rem;
+    height: 15rem;
 }
 
-h1 {
-    align-content: center;
-    margin: 25px;
+@media screen and (max-width: 768px) {
+    html {
+        font-size: 6px;
+    }
+}
+
+@media screen and (min-width: 768px) and (max-width: 1024px) {
+
+    .logo img {
+        width: 10rem;
+        height: 10rem;
+    }
+
+    .logo>#phrase {
+        font-size: 5rem;
+    }
+
+    .logo>#disc {
+        font-size: 3rem;
+    }
+}
+
+@media screen and (max-width:1366px) {
+    .navbar {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .navbar a:first-child {
+        margin: 2rem 2rem 2rem 0;
+    }
+}
+
+@media screen and (min-width: 1024px) and (max-width: 1366px) {}
+
+@media screen and (min-width: 1366px) {
+    html {
+        font-size: 10px;
+    }
 }
