@@ -26,8 +26,8 @@
 
         <div class="logo">
             <img src="{{asset('images/logo.png')}}" alt="" id="image-logo">
-            <label for="image-logo" id="phrase">Sos@l co...</label>
-            <label for="phrase" id="disc">Your games of future!</label>
+            <label for="image-logo" id="phrase">Sos@l...</label>
+            <label for="phrase" id="disc">Games of future!</label>
 
         </div>
         <div class="navigation">
@@ -39,9 +39,24 @@
     </div>
 </div>
 
+<dialog open id="dialog-example" >
+    <form method="dialog">
+        <p>Я люблю Яну</p>
+        <p>Я люблю Яну</p>
+        <p>Я люблю Яну</p>
+        <p>Я люблю Яну</p>
+        <p>Я люблю Яну</p>
+        <menu>
+            <button value="cancel">Закрыть</button>
+            <button id="confirmBtn" value="default">СОсал?</button>
+        </menu>
+    </form>
+</dialog>
 {% endblock %}
 
 </div>
+
+
 
 <body>
     {% block body %}
