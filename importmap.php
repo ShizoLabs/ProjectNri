@@ -16,4 +16,8 @@ return [
         'path' => './assets/app.js',
         'entrypoint' => true,
     ],
+    'session' => [
+        'path' => './assets/session.js',
+        'entrypoint' => true,
+    ],
 ];
