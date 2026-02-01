@@ -6,7 +6,7 @@
 {{ parent() }}
 {# Phaser #}
 <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
-{% block importmap %}{{ importmap('session') }}{% endblock %}
+{{ importmap('session') }}
 {% endblock %}
 
 {% block body %}
@@ -25,7 +25,14 @@
         </div>
         <!-- Tab content -->
         <div id="tab-content">
-            <div class="tab" id="tab1">Content for Tab 1</div>
+            <div class="tab modal" id="tab1" data-href="{{ path('token_create') }}">
+                <span>Create new token</span>
+                <div>
+                    {% for token in tokens %}
+                        <span>{{ token }}</span>
+                    {% endfor %}
+                </div>
+            </div>
             <div class="tab" id="tab2" style="display:none;">Content for Tab 2</div>
             <div class="tab" id="tab3" style="display:none;">Content for Tab 3</div>
         </div>

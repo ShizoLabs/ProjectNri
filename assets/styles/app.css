@@ -215,3 +215,20 @@ body {
         font-size: 10px;
     }
 }
+
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.modal {
+    background: #fff;
+    padding: 1.5rem;
+    width: 400px;
+    border-radius: 8px;
+}
