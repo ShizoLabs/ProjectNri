@@ -12,8 +12,6 @@ FROM frankenphp_upstream AS frankenphp_base
 
 WORKDIR /app
 
-VOLUME /app/var/
-
 # persistent / runtime deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
     file \
@@ -38,6 +36,9 @@ ENV PHP_INI_SCAN_DIR=":$PHP_INI_DIR/app.conf.d"
 COPY --link frankenphp/conf.d/10-app.ini $PHP_INI_DIR/app.conf.d/
 COPY --link --chmod=755 frankenphp/docker-entrypoint.sh /usr/local/bin/docker-entrypoint
 COPY --link frankenphp/Caddyfile /etc/frankenphp/Caddyfile
+
+RUN mkdir -p /data/caddy \
+    && chown -R www-data:www-data /data
 
 ENTRYPOINT ["docker-entrypoint"]
 

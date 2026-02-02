@@ -15,8 +15,18 @@ final class SessionController extends AbstractController
     {
         $tokens = $dm->getRepository(Token::class)->findAll();
 
+        $tokensData = [];
+
+        foreach ($tokens as $sessionToken) {
+            $tokensData[] = [
+                'id' => $sessionToken->getId(),
+                'name' => $sessionToken->getName(),
+                'x' => $sessionToken->getX(),
+                'y' => $sessionToken->getY(),
+            ];
+        }
+
         return $this->render('session/index.html.twig', [
-            'controller_name' => 'SessionController',
             'tokens' => $tokens,
         ]);
     }

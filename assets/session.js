@@ -22,6 +22,7 @@ class MainScene extends Phaser.Scene {
         this.mapWidth = 2000;
         this.mapHeight = 2000;
         this.gridSize = 50;
+        this.selectedToken = null;
     }
 
     create() {
@@ -63,12 +64,19 @@ class MainScene extends Phaser.Scene {
         // Group for all tokens
         this.tokensGroup = this.add.group();
         // Add new token
-        this.addToken(
-            Math.floor(mapWidth / 2 / gridSize) * gridSize + gridSize / 2, // X
-            Math.floor(mapHeight / 2 / gridSize) * gridSize + gridSize / 2, // Y
-            25, 
-            0x0000ff
-        );
+        if (window.SESSION_TOKENS) {
+            window.SESSION_TOKENS.forEach(data => {
+                const token = this.addToken(
+                    data.x,
+                    data.y,
+                    25,
+                    data.color ?? 0x0000ff
+                );
+                // Connect token with DB
+                token.tokenId = data.id;
+                token.tokenName = data.name;
+            });
+        }
         /** -----CAMERA----- */
         // Set cameras view
         this.cameras.main.setBounds(0, 0, mapWidth, mapHeight);
@@ -79,8 +87,11 @@ class MainScene extends Phaser.Scene {
         const mapW = this.mapWidth;
         const mapH = this.mapHeight;
 
-        const token = this.add.circle(x, y, radius, color)
-            .setInteractive({ draggable: true });
+        const token = this.add.circle(x, y, radius, color).setInteractive({ draggable: true });
+        // Выбор токена при клике
+        token.on('pointerdown', () => {
+            this.selectToken(token);
+        });
         // Drag: ограничиваем по реальной карте
         token.on('drag', (pointer, dragX, dragY) => {
             token.x = Phaser.Math.Clamp(dragX, radius, mapW - radius);
@@ -99,6 +110,18 @@ class MainScene extends Phaser.Scene {
         this.tokensGroup.add(token);
 
         return token;
+    }
+
+    selectToken(token) {
+        // Если выбран - то перевыбрать
+        if (this.selectedToken) {
+            this.selectedToken.setStrokeStyle();
+        }
+
+        this.selectedToken = token;
+
+        // Визуальное выделение
+        token.setStrokeStyle(3, 0xffff00);
     }
 }
 

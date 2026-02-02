@@ -12,7 +12,16 @@ class Token
     private ?string $id = null;
 
     #[ODM\Field(type: 'string')]
-    private string $name;
+    private string $name = '';
+
+    #[ODM\Field(type: 'int')]
+    private int $x = 0;
+
+    #[ODM\Field(type: 'int')]
+    private int $y = 0;
+
+    #[ODM\Field(type: 'string')]
+    private string $sessionId = '';
 
     public function __toString(): string 
     {
@@ -33,6 +42,39 @@ class Token
     public function setName(string $name): self
     {
         $this->name = $name;
+        return $this;
+    }
+
+    public function getX(): int
+    {
+        return $this->x;
+    }
+
+    public function setX(string $x): self
+    {
+        $this->x = $x;
+        return $this;
+    }
+
+    public function getY(): int
+    {
+        return $this->y;
+    }
+
+    public function setY(string $y): self
+    {
+        $this->y = $y;
+        return $this;
+    }
+
+    public function getSessionId(): string
+    {
+        return $this->sessionId;
+    }
+
+    public function setSessionId(string $sessionId): self
+    {
+        $this->sessionId = $sessionId;
         return $this;
     }
 }

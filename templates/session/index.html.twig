@@ -4,6 +4,10 @@
 
 {% block javascripts %}
 {{ parent() }}
+{# Set tokens #}
+<script>
+    window.SESSION_TOKENS = {{ tokens|json_encode|raw }};
+</script>
 {# Phaser #}
 <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
 {{ importmap('session') }}

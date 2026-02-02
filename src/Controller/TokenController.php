@@ -19,7 +19,6 @@ final class TokenController extends AbstractController
 
         $form = $this->createForm(TokenType::class, $token);
         $form->handleRequest($request);
-        dump($form->isSubmitted());
 
         if ($form->isSubmitted() && $form->isValid()) {
             $dm->persist($token);
