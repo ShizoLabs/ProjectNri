@@ -1,7 +1,7 @@
 <div class="modal-overlay">
-    <h1>Create Token</h1>
+    <h1>Create Session</h1>
 
-    {{ form_start(form, {action: path('token_create', {session: sessionId}), method: 'POST'}) }}
+    {{ form_start(form, {action: path('session_create'), method: 'POST'}) }}
         {{ form_row(form.name) }}
 
         <button type="submit">Create</button>

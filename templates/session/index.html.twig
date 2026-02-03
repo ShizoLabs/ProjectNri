@@ -1,47 +1,27 @@
 {% extends 'base.html.twig' %}
 
-{% block title %}Hello SessionController!{% endblock %}
-
-{% block javascripts %}
-{{ parent() }}
-{# Set tokens #}
-<script>
-    window.SESSION_TOKENS = {{ tokens|json_encode|raw }};
-</script>
-{# Phaser #}
-<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
-{{ importmap('session') }}
-{% endblock %}
+{% block title %}Sessions menu{% endblock %}
 
 {% block body %}
-<div style="display: flex; height: 70rem;">
-    <!-- Left control panel -->
+<div class="modal-overlay">
+    <h1>Sessions</h1>
 
-    <!-- Game container -->
-    <div id="game-container" style="flex-grow: 1; background: #222; overflow: hidden;"></div>
-    <!-- Right control panel -->
-    <div id="control-panel" style="width: 20rem; background: #333; color: #fff; padding: 1rem;">
-        <!-- Tabs buttons -->
-        <div id="tabs" style="display: flex; margin-bottom: 1rem;">
-            <button class="tab-btn active" data-tab="tab1" style="flex:1;">Tokens</button>
-            <button class="tab-btn" data-tab="tab2" style="flex:1;">Rules</button>
-            <button class="tab-btn" data-tab="tab3" style="flex:1;">Settings</button>
-        </div>
-        <!-- Tab content -->
-        <div id="tab-content">
-            <div class="tab modal" id="tab1" data-href="{{ path('token_create') }}">
-                <span>Create new token</span>
-                <div>
-                    {% for token in tokens %}
-                        <span>{{ token.name }}</span>
-                    {% else %}
-                        <span>No tokens</span>
-                    {% endfor %}
-                </div>
-            </div>
-            <div class="tab" id="tab2" style="display:none;">Content for Tab 2</div>
-            <div class="tab" id="tab3" style="display:none;">Content for Tab 3</div>
-        </div>
+    <div class="modal" data-href="{{ path('session_create') }}">
+        <span>Create new session</span>
     </div>
+
+    {% if sessions is empty %}
+        <p>No sessions yet.</p>
+    {% else %}
+        <ul class="session-list">
+            {% for session in sessions %}
+                <li>
+                    <a href="{{ path('session_open', {id: session.id}) }}">
+                        {{ session.name }}
+                    </a>
+                </li>
+            {% endfor %}
+        </ul>
+    {% endif %}
 </div>
 {% endblock %}

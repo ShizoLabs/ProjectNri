@@ -1,0 +1,56 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Session{% endblock %}
+
+{% block javascripts %}
+{{ parent() }}
+{# Set tokens #}
+<script>
+    window.SESSION_TOKENS = {{ tokens|json_encode|raw }};
+    window.SESSION_MAP = {{ map|json_encode|raw }};
+    window.SESSION_ID = {{ sessionId|json_encode|raw }};
+</script>
+{# Phaser #}
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+{{ importmap('session') }}
+{% endblock %}
+
+{% block body %}
+<div style="display: flex; height: 70rem;">
+    <!-- Left control panel -->
+
+    <!-- Game container -->
+    <div id="game-container" style="flex-grow: 1; background: #222; overflow: hidden;"></div>
+    <!-- Right control panel -->
+    <div id="control-panel" style="width: 20rem; background: #333; color: #fff; padding: 1rem;">
+        <!-- Tabs buttons -->
+        <div id="tabs" style="display: flex; margin-bottom: 1rem;">
+            <button class="tab-btn active" data-tab="tab1" style="flex:1;">Tokens</button>
+            <button class="tab-btn" data-tab="tab2" style="flex:1;">Rules</button>
+            <button class="tab-btn" data-tab="tab3" style="flex:1;">Settings</button>
+        </div>
+        <!-- Tab content -->
+        <div id="tab-content">
+            <div class="tab modal" id="tab1" data-href="{{ path('token_create', {session: sessionId}) }}">
+                <span>Create new token</span>
+                <div>
+                    {% for token in sessionTokens %}
+                        <div class="token-row" data-token-id="{{ token.id }}" data-token-name="{{ token.name }}">
+                            <span>{{ token.name }}</span>
+                            {% if token.mapId is empty %}
+                                <button class="token-place-btn" type="button">Add to map</button>
+                            {% else %}
+                                <span>On map</span>
+                            {% endif %}
+                        </div>
+                    {% else %}
+                        <span>No tokens</span>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="tab" id="tab2" style="display:none;">Content for Tab 2</div>
+            <div class="tab" id="tab3" style="display:none;">Content for Tab 3</div>
+        </div>
+    </div>
+</div>
+{% endblock %}

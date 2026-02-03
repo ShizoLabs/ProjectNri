@@ -17,6 +17,10 @@ final class TokenController extends AbstractController
     public function index(Request $request, DocumentManager $dm): Response
     {
         $token = new Token();
+        $sessionId = $request->query->get('session');
+        if (is_string($sessionId) && $sessionId !== '') {
+            $token->setSessionId($sessionId);
+        }
 
         $form = $this->createForm(TokenType::class, $token);
         $form->handleRequest($request);
@@ -25,11 +29,16 @@ final class TokenController extends AbstractController
             $dm->persist($token);
             $dm->flush();
 
+            if (is_string($sessionId) && $sessionId !== '') {
+                return $this->redirectToRoute('session_open', ['id' => $sessionId]);
+            }
+
             return $this->redirectToRoute('session_index');
         }
 
         return $this->render('token/create.html.twig', [
             'form' => $form->createView(),
+            'sessionId' => $sessionId,
         ]);
     }
 
@@ -47,6 +56,9 @@ final class TokenController extends AbstractController
 
         $token->setX((int) $data['x']);
         $token->setY((int) $data['y']);
+        if (isset($data['mapId']) && is_string($data['mapId'])) {
+            $token->setMapId($data['mapId']);
+        }
 
         $dm->persist($token);
         $dm->flush();

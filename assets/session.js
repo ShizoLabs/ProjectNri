@@ -26,6 +26,10 @@ class MainScene extends Phaser.Scene {
     }
 
     create() {
+        if (window.SESSION_MAP) {
+            this.mapWidth = window.SESSION_MAP.width ?? this.mapWidth;
+            this.mapHeight = window.SESSION_MAP.height ?? this.mapHeight;
+        }
         /** -----MAP----- */
         // Map size in px
         const mapWidth = this.mapWidth;
@@ -75,6 +79,7 @@ class MainScene extends Phaser.Scene {
                 // Connect token with DB
                 token.tokenId = data.id;
                 token.tokenName = data.name;
+                token.mapId = window.SESSION_MAP?.id ?? null;
             });
         }
         /** -----CAMERA----- */
@@ -108,7 +113,7 @@ class MainScene extends Phaser.Scene {
             fetch(`/token/${token.tokenId}/move`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ x: token.x, y: token.y })
+                body: JSON.stringify({ x: token.x, y: token.y, mapId: token.mapId })
             });
         });
 
@@ -150,6 +155,37 @@ const game = new Phaser.Game(config);
 
 // Switch tabs
 $(document).ready(function() {
+    // Place token on the map
+    $('.token-place-btn').click(function() {
+        const row = $(this).closest('.token-row');
+        const tokenId = row.data('token-id');
+        const tokenName = row.data('token-name');
+        const mapId = window.SESSION_MAP?.id;
+
+        if (!tokenId || !mapId) {
+            return;
+        }
+
+        const scene = game.scene.keys.MainScene;
+        const gs = scene.gridSize;
+        const startX = Math.round(scene.mapWidth / 2 / gs) * gs + gs / 2;
+        const startY = Math.round(scene.mapHeight / 2 / gs) * gs + gs / 2;
+
+        fetch(`/token/${tokenId}/move`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ x: startX, y: startY, mapId })
+        }).then(() => {
+            const token = scene.addToken(startX, startY, 25, 0x0000ff);
+            token.tokenId = tokenId;
+            token.tokenName = tokenName;
+            token.mapId = mapId;
+
+            row.find('.token-place-btn').remove();
+            row.append('<span>On map</span>');
+        });
+    });
+
     $('.tab-btn').click(function() {
         const tabId = $(this).data('tab');
 

@@ -21,7 +21,10 @@ class Token
     private int $y = 0;
 
     #[ODM\Field(type: 'string')]
-    private string $sessionId = '';
+    private ?string $sessionId = null;
+
+    #[ODM\Field(type: 'string')]
+    private ?string $mapId = null;
 
     public function __toString(): string 
     {
@@ -67,14 +70,25 @@ class Token
         return $this;
     }
 
-    public function getSessionId(): string
+    public function getSessionId(): ?string
     {
         return $this->sessionId;
     }
 
-    public function setSessionId(string $sessionId): self
+    public function setSessionId(?string $sessionId): self
     {
         $this->sessionId = $sessionId;
+        return $this;
+    }
+
+    public function getMapId(): ?string
+    {
+        return $this->mapId;
+    }
+
+    public function setMapId(?string $mapId): self
+    {
+        $this->mapId = $mapId;
         return $this;
     }
 }
