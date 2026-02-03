@@ -104,6 +104,12 @@ class MainScene extends Phaser.Scene {
             // Присваиваем только если реально изменилось (избегаем лишних перерисовок)
             if (Math.abs(snappedX - token.x) > 0.0001) token.x = snappedX;
             if (Math.abs(snappedY - token.y) > 0.0001) token.y = snappedY;
+            // Отправляем на сервер
+            fetch(`/token/${token.tokenId}/move`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ x: token.x, y: token.y })
+            });
         });
 
         this.cameras.main.startFollow(token, true, 0.08, 0.08);

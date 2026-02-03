@@ -33,7 +33,9 @@
                 <span>Create new token</span>
                 <div>
                     {% for token in tokens %}
-                        <span>{{ token }}</span>
+                        <span>{{ token.name }}</span>
+                    {% else %}
+                        <span>No tokens</span>
                     {% endfor %}
                 </div>
             </div>
