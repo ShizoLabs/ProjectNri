@@ -64,6 +64,8 @@ class MainScene extends Phaser.Scene {
         grid.strokePath();
         // Grid as neutral layer
         grid.setDepth(0);
+        this.gridLayer = grid;
+        this.gridVisible = true;
         /** -----TOKENS----- */
         // Group for all tokens
         this.tokensGroup = this.add.group();
@@ -85,6 +87,42 @@ class MainScene extends Phaser.Scene {
         /** -----CAMERA----- */
         // Set cameras view
         this.cameras.main.setBounds(0, 0, mapWidth, mapHeight);
+        this.cameras.main.setZoom(1);
+        this.isPanning = false;
+        this.lastPanPoint = null;
+
+        this.input.on('wheel', (pointer, gameObjects, deltaX, deltaY) => {
+            const camera = this.cameras.main;
+            const zoomDelta = deltaY * -0.001;
+            const nextZoom = Phaser.Math.Clamp(camera.zoom + zoomDelta, 0.2, 2.5);
+            camera.setZoom(nextZoom);
+        });
+
+        this.input.on('pointerdown', (pointer, gameObjects) => {
+            if (gameObjects && gameObjects.length > 0) {
+                return;
+            }
+            this.deselectToken();
+            this.isPanning = true;
+            this.lastPanPoint = new Phaser.Math.Vector2(pointer.x, pointer.y);
+        });
+
+        this.input.on('pointerup', () => {
+            this.isPanning = false;
+            this.lastPanPoint = null;
+        });
+
+        this.input.on('pointermove', (pointer) => {
+            if (!this.isPanning || !this.lastPanPoint) {
+                return;
+            }
+            const camera = this.cameras.main;
+            const dx = (this.lastPanPoint.x - pointer.x) / camera.zoom;
+            const dy = (this.lastPanPoint.y - pointer.y) / camera.zoom;
+            camera.scrollX += dx;
+            camera.scrollY += dy;
+            this.lastPanPoint.set(pointer.x, pointer.y);
+        });
     }
 
     addToken(x, y, radius, color) {
@@ -117,7 +155,6 @@ class MainScene extends Phaser.Scene {
             });
         });
 
-        this.cameras.main.startFollow(token, true, 0.08, 0.08);
         this.tokensGroup.add(token);
 
         return token;
@@ -133,6 +170,16 @@ class MainScene extends Phaser.Scene {
 
         // Визуальное выделение
         token.setStrokeStyle(3, 0xffff00);
+
+        this.cameras.main.startFollow(token, true, 0.08, 0.08);
+    }
+
+    deselectToken() {
+        if (this.selectedToken) {
+            this.selectedToken.setStrokeStyle();
+        }
+        this.selectedToken = null;
+        this.cameras.main.stopFollow();
     }
 }
 
@@ -155,6 +202,21 @@ const game = new Phaser.Game(config);
 
 // Switch tabs
 $(document).ready(function() {
+    // Toggle maps list
+    $('#map-list-toggle').click(function() {
+        $('#map-list-panel').toggleClass('is-open');
+    });
+
+    // Switch map
+    $(document).on('click', '.map-switch-btn', function() {
+        const mapId = $(this).data('map-id');
+        if (!mapId) {
+            return;
+        }
+        const baseUrl = window.SESSION_OPEN_URL || `/session/${window.SESSION_ID}`;
+        window.location.href = `${baseUrl}?map=${mapId}`;
+    });
+
     // Place token on the map
     $('.token-place-btn').click(function() {
         const row = $(this).closest('.token-row');
@@ -171,18 +233,18 @@ $(document).ready(function() {
         const startX = Math.round(scene.mapWidth / 2 / gs) * gs + gs / 2;
         const startY = Math.round(scene.mapHeight / 2 / gs) * gs + gs / 2;
 
-        fetch(`/token/${tokenId}/move`, {
+        fetch(`/token/${tokenId}/spawn`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ x: startX, y: startY, mapId })
-        }).then(() => {
+        }).then((res) => res.json()).then((data) => {
+            if (!data || !data.id) {
+                return;
+            }
             const token = scene.addToken(startX, startY, 25, 0x0000ff);
-            token.tokenId = tokenId;
+            token.tokenId = data.id;
             token.tokenName = tokenName;
             token.mapId = mapId;
-
-            row.find('.token-place-btn').remove();
-            row.append('<span>On map</span>');
         });
     });
 
@@ -195,5 +257,57 @@ $(document).ready(function() {
         $('.tab').hide();
 
         $('#' + tabId).show();
+    });
+
+    // Map tools
+    $('.tool-btn').click(function() {
+        const tool = $(this).data('tool');
+        const scene = game.scene.keys.MainScene;
+        if (!scene) {
+            return;
+        }
+        const camera = scene.cameras.main;
+
+        switch (tool) {
+            case 'zoom-in': {
+                const nextZoom = Phaser.Math.Clamp(camera.zoom + 0.1, 0.2, 2.5);
+                camera.setZoom(nextZoom);
+                break;
+            }
+            case 'zoom-out': {
+                const nextZoom = Phaser.Math.Clamp(camera.zoom - 0.1, 0.2, 2.5);
+                camera.setZoom(nextZoom);
+                break;
+            }
+            case 'zoom-reset':
+                camera.setZoom(1);
+                break;
+            case 'center-map':
+                camera.centerOn(scene.mapWidth / 2, scene.mapHeight / 2);
+                break;
+            case 'toggle-grid':
+                scene.gridVisible = !scene.gridVisible;
+                if (scene.gridLayer) {
+                    scene.gridLayer.setVisible(scene.gridVisible);
+                }
+                break;
+            case 'remove-token': {
+                const token = scene.selectedToken;
+                if (!token || !token.tokenId) {
+                    return;
+                }
+                fetch(`/token/${token.tokenId}/remove`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                }).then(() => {
+                    token.destroy();
+                    scene.selectedToken = null;
+                    scene.cameras.main.stopFollow();
+                });
+                break;
+            }
+            default:
+                break;
+        }
     });
 });

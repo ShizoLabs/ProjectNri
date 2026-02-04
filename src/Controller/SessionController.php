@@ -52,13 +52,26 @@ final class SessionController extends AbstractController
     }
     /** Init open session by id */
     #[Route('/session/{id}', name: 'session_open')]
-    public function openSession(Session $session, DocumentManager $dm): Response
+    public function openSession(Session $session, Request $request, DocumentManager $dm): Response
     {
         $sessionId = $session->getId();
         $tokens = $dm->getRepository(Token::class)->findBy(['sessionId' => $sessionId]);
-        $map = $dm->getRepository(Map::class)->findOneBy(['sessionId' => $sessionId]);
+        $maps = $dm->getRepository(Map::class)->findBy(['sessionId' => $sessionId]);
+
+        $mapIdParam = $request->query->get('map');
+        $map = null;
+        if (is_string($mapIdParam) && $mapIdParam !== '') {
+            $candidate = $dm->getRepository(Map::class)->find($mapIdParam);
+            if ($candidate !== null && $candidate->getSessionId() === $sessionId) {
+                $map = $candidate;
+            }
+        }
+        if ($map === null) {
+            $map = $maps[0] ?? null;
+        }
 
         $tokensData = [];
+        $templateTokens = [];
 
         $mapId = $map?->getId();
         foreach ($tokens as $sessionToken) {
@@ -70,11 +83,14 @@ final class SessionController extends AbstractController
                     'y' => $sessionToken->getY(),
                 ];
             }
+            if ($sessionToken->getMapId() === null && $sessionToken->getTemplateId() === null) {
+                $templateTokens[] = $sessionToken;
+            }
         }
 
         return $this->render('session/session.html.twig', [
             'tokens' => $tokensData,
-            'sessionTokens' => $tokens,
+            'sessionTokens' => $templateTokens,
             'sessionId' => $sessionId,
             'map' => $map ? [
                 'id' => $map->getId(),
@@ -82,6 +98,14 @@ final class SessionController extends AbstractController
                 'width' => $map->getWidth(),
                 'height' => $map->getHeight(),
             ] : null,
+            'sessionMaps' => array_map(static function (Map $map) {
+                return [
+                    'id' => $map->getId(),
+                    'name' => $map->getName(),
+                    'width' => $map->getWidth(),
+                    'height' => $map->getHeight(),
+                ];
+            }, $maps),
         ]);
     }
 }

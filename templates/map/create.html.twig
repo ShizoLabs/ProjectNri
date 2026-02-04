@@ -1,0 +1,11 @@
+<div class="modal-overlay">
+    <h1>Create Map</h1>
+
+    {{ form_start(form, {action: path('map_create', {session: sessionId}), method: 'POST'}) }}
+        {{ form_row(form.name) }}
+        {{ form_row(form.width) }}
+        {{ form_row(form.height) }}
+
+        <button type="submit">Create</button>
+    {{ form_end(form) }}
+</div>

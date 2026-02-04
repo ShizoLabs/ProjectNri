@@ -26,6 +26,9 @@ class Token
     #[ODM\Field(type: 'string')]
     private ?string $mapId = null;
 
+    #[ODM\Field(type: 'string')]
+    private ?string $templateId = null;
+
     public function __toString(): string 
     {
         return $this->getName() ?? null;
@@ -89,6 +92,17 @@ class Token
     public function setMapId(?string $mapId): self
     {
         $this->mapId = $mapId;
+        return $this;
+    }
+
+    public function getTemplateId(): ?string
+    {
+        return $this->templateId;
+    }
+
+    public function setTemplateId(?string $templateId): self
+    {
+        $this->templateId = $templateId;
         return $this;
     }
 }

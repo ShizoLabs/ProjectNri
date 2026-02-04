@@ -9,6 +9,7 @@
     window.SESSION_TOKENS = {{ tokens|json_encode|raw }};
     window.SESSION_MAP = {{ map|json_encode|raw }};
     window.SESSION_ID = {{ sessionId|json_encode|raw }};
+    window.SESSION_OPEN_URL = {{ path('session_open', {id: sessionId})|json_encode|raw }};
 </script>
 {# Phaser #}
 <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
@@ -16,13 +17,48 @@
 {% endblock %}
 
 {% block body %}
-<div style="display: flex; height: 70rem;">
+<div class="session-layout">
     <!-- Left control panel -->
+    <div id="map-tools" class="map-tools">
+        <div class="map-tools-header">Map tools</div>
+        <button class="tool-btn" type="button" data-tool="zoom-in">Zoom in</button>
+        <button class="tool-btn" type="button" data-tool="zoom-out">Zoom out</button>
+        <button class="tool-btn" type="button" data-tool="zoom-reset">Zoom reset</button>
+        <button class="tool-btn" type="button" data-tool="center-map">Center map</button>
+        <button class="tool-btn" type="button" data-tool="toggle-grid">Toggle grid</button>
+        <button class="tool-btn tool-danger" type="button" data-tool="remove-token">Remove selected token</button>
+    </div>
 
     <!-- Game container -->
-    <div id="game-container" style="flex-grow: 1; background: #222; overflow: hidden;"></div>
+    <div class="map-area">
+        <div class="map-top-right">
+            <button id="map-list-toggle" class="map-top-btn" type="button">Maps</button>
+            <div id="map-list-panel" class="map-list-panel">
+                <div class="map-list-title">Session maps</div>
+                <div class="map-list-items">
+                    {% for mapItem in sessionMaps %}
+                        <button
+                            class="map-switch-btn{% if map is not null and mapItem.id == map.id %} active{% endif %}"
+                            type="button"
+                            data-map-id="{{ mapItem.id }}"
+                        >
+                            <span>{{ mapItem.name }}</span>
+                            <small>{{ mapItem.width }}x{{ mapItem.height }}</small>
+                        </button>
+                    {% else %}
+                        <div class="map-empty">No maps found</div>
+                    {% endfor %}
+                </div>
+                <div class="modal map-create-btn" data-href="{{ path('map_create', {session: sessionId}) }}">
+                    <span>Create new map</span>
+                </div>
+            </div>
+        </div>
+        <div id="game-container"></div>
+    </div>
+
     <!-- Right control panel -->
-    <div id="control-panel" style="width: 20rem; background: #333; color: #fff; padding: 1rem;">
+    <div id="control-panel" class="control-panel">
         <!-- Tabs buttons -->
         <div id="tabs" style="display: flex; margin-bottom: 1rem;">
             <button class="tab-btn active" data-tab="tab1" style="flex:1;">Tokens</button>
@@ -31,17 +67,15 @@
         </div>
         <!-- Tab content -->
         <div id="tab-content">
-            <div class="tab modal" id="tab1" data-href="{{ path('token_create', {session: sessionId}) }}">
-                <span>Create new token</span>
+            <div class="tab" id="tab1">
+                <div class="modal" data-href="{{ path('token_create', {session: sessionId}) }}">
+                    <span>Create new token</span>
+                </div>
                 <div>
                     {% for token in sessionTokens %}
                         <div class="token-row" data-token-id="{{ token.id }}" data-token-name="{{ token.name }}">
                             <span>{{ token.name }}</span>
-                            {% if token.mapId is empty %}
-                                <button class="token-place-btn" type="button">Add to map</button>
-                            {% else %}
-                                <span>On map</span>
-                            {% endif %}
+                            <button class="token-place-btn" type="button">Add to map</button>
                         </div>
                     {% else %}
                         <span>No tokens</span>
