@@ -1,9 +1,11 @@
-<div class="modal-overlay">
-    <h1>Create Session</h1>
+{% extends 'modalContent.html.twig' %}
 
+{% block modalContent %}
+    <h1>Create Session</h1>
     {{ form_start(form, {action: path('session_create'), method: 'POST'}) }}
         {{ form_row(form.name) }}
 
         <button type="submit">Create</button>
     {{ form_end(form) }}
-</div>
+{% endblock %}
+

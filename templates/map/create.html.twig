@@ -1,4 +1,6 @@
-<div class="modal-overlay">
+{% extends 'modalContent.html.twig' %}
+
+{% block modalContent %}
     <h1>Create Map</h1>
 
     {{ form_start(form, {action: path('map_create', {session: sessionId}), method: 'POST'}) }}
@@ -8,4 +10,4 @@
 
         <button type="submit">Create</button>
     {{ form_end(form) }}
-</div>
+{% endblock %}

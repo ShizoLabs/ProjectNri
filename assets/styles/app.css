@@ -126,6 +126,7 @@ body {
     display: flex;
     flex: 1;
     align-items: center;
+    padding-bottom: 10rem;
 }
 
 .navbar>.logo {
@@ -224,6 +225,23 @@ body {
     align-items: center;
     justify-content: center;
     z-index: 1000;
+    font-size: large;
+    .modal-content {
+        border: 1px solid white;
+        padding: 1rem;
+        form {
+            display: flex;
+            flex-direction: column;
+            padding: 1rem;
+            label {
+                padding-right: 0.5rem;
+            }
+            input {
+                border: 1px solid white;
+                border-radius: 6px;
+            }
+        }
+    }
 }
 
 .modal {
@@ -372,4 +390,11 @@ body {
     .map-area {
         height: 60rem;
     }
+}
+
+.index-session-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
 }
