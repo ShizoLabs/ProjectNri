@@ -81,6 +81,10 @@ final class SessionController extends AbstractController
                     'name' => $sessionToken->getName(),
                     'x' => $sessionToken->getX(),
                     'y' => $sessionToken->getY(),
+                    'sizeX' => $sessionToken->getSizeX(),
+                    'sizeY' => $sessionToken->getSizeY(),
+                    'rotation' => $sessionToken->getRotation(),
+                    'imagePath' => $sessionToken->getImagePath(),
                 ];
             }
             if ($sessionToken->getMapId() === null && $sessionToken->getTemplateId() === null) {

@@ -3,7 +3,7 @@
 namespace App\Controller;
 
 use App\Document\Token;
-use App\Form\TokenType;
+use App\Form\TokenFormType;
 use Doctrine\ODM\MongoDB\DocumentManager;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -22,15 +22,32 @@ final class TokenController extends AbstractController
             $token->setSessionId($sessionId);
         }
 
-        $form = $this->createForm(TokenType::class, $token);
+        $form = $this->createForm(TokenFormType::class, $token);
         $form->handleRequest($request);
-
+        
         if ($form->isSubmitted() && $form->isValid()) {
+            $imageFile = $form->get('imageFile')->getData();
+            if ($imageFile) {
+                $projectDir = $this->getParameter('kernel.project_dir');
+                $uploadDir = $projectDir . '/public/uploads/tokens';
+                if (!is_dir($uploadDir)) {
+                    mkdir($uploadDir, 0775, true);
+                }
+
+                $extension = $imageFile->guessExtension() ?: 'bin';
+                $newFilename = uniqid('token_', true) . '.' . $extension;
+                $imageFile->move($uploadDir, $newFilename);
+                $token->setImagePath('/uploads/tokens/' . $newFilename);
+            }
+
             $dm->persist($token);
             $dm->flush();
 
-            if (is_string($sessionId) && $sessionId !== '') {
-                return $this->redirectToRoute('session_open', ['id' => $sessionId]);
+            if ($request->isXmlHttpRequest()) {
+                return $this->json([
+                    'success' => true,
+                    'redirect' => $this->generateUrl('session_open', ['id' => $sessionId]),
+                ]);
             }
 
             return $this->redirectToRoute('session_index');
@@ -85,6 +102,11 @@ final class TokenController extends AbstractController
         $token->setMapId($mapId);
         $token->setX((int) ($data['x'] ?? 0));
         $token->setY((int) ($data['y'] ?? 0));
+        $token->setSizeX($template->getSizeX());
+        $token->setSizeY($template->getSizeY());
+        $token->setRotation($template->getRotation());
+        $token->setImagePath($template->getImagePath());
+        $token->setTokenType($template->getTokenType());
 
         $dm->persist($token);
         $dm->flush();
@@ -95,6 +117,10 @@ final class TokenController extends AbstractController
             'x' => $token->getX(),
             'y' => $token->getY(),
             'mapId' => $token->getMapId(),
+            'sizeX' => $token->getSizeX(),
+            'sizeY' => $token->getSizeY(),
+            'rotation' => $token->getRotation(),
+            'imagePath' => $token->getImagePath(),
         ]);
     }
 

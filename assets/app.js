@@ -1,15 +1,10 @@
-/*
- * Welcome to your app's main JavaScript file!
- *
- * This file will be included onto the page via the importmap() Twig function,
- * which should already be in your base.html.twig.
- */
 import './styles/app.css';
 
-console.log('Test');
 $(document).ready(function() {
-    /** -----MODAL----- */
-    $('.modal').on('click', function () {
+    // Open modal
+    $(document).on('click', '.modal', function (e) {
+        e.preventDefault();
+
         const url = $(this).data('href');
 
         $.get(url, function (html) {
@@ -21,9 +16,39 @@ $(document).ready(function() {
     $(document).on('click', '.modal-close', function () {
         $('#modal-root').empty();
     });
+
     $(document).on('click', '.modal-overlay', function (e) {
         if (e.target === this) {
             $('#modal-root').empty();
         }
+    });
+    // Ajax form send
+    $(document).on('submit', '#modal-root form', function (e) {
+        e.preventDefault();
+
+        const form = $(this);
+        const url = form.attr('action');
+        const method = form.attr('method') || 'POST';
+        const formData = new FormData(this);
+
+        $.ajax({
+            url: url,
+            type: method,
+            data: formData,
+            processData: false,   // important for FormData
+            contentType: false,   // also FormData
+            success: function (response) {
+                // Success
+                if (typeof response === 'object' && response.success) {
+                    window.location.href = response.redirect;
+                    return;
+                }
+                // Else validation error
+                $('#modal-root').html(response);
+            },
+            error: function (xhr) {
+                console.error('AJAX error:', xhr);
+            }
+        });
     });
 });

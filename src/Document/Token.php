@@ -4,6 +4,7 @@ namespace App\Document;
 
 use Doctrine\ODM\MongoDB\Mapping\Attribute as ODM;
 use App\Repository\TokenRepository;
+use App\Document\TokenType;
 
 #[ODM\Document(collection: 'tokens', repositoryClass: TokenRepository::class)]
 class Token
@@ -20,6 +21,18 @@ class Token
     #[ODM\Field(type: 'int')]
     private int $y = 0;
 
+    #[ODM\Field(type: 'int')]
+    private int $sizeX = 50;
+
+    #[ODM\Field(type: 'int')]
+    private int $sizeY = 50;
+
+    #[ODM\Field(type: 'int')]
+    private int $rotation = 0;
+
+    #[ODM\Field(type: 'string')]
+    private ?string $imagePath = null;
+
     #[ODM\Field(type: 'string')]
     private ?string $sessionId = null;
 
@@ -29,9 +42,12 @@ class Token
     #[ODM\Field(type: 'string')]
     private ?string $templateId = null;
 
+    #[ODM\ReferenceOne(targetDocument: TokenType::class, inversedBy: 'tokens')]
+    private ?TokenType $tokenType = null;
+
     public function __toString(): string 
     {
-        return $this->getName() ?? null;
+        return $this->getName();
     }
 
     // Getters
@@ -56,7 +72,7 @@ class Token
         return $this->x;
     }
 
-    public function setX(string $x): self
+    public function setX(int $x): self
     {
         $this->x = $x;
         return $this;
@@ -67,9 +83,53 @@ class Token
         return $this->y;
     }
 
-    public function setY(string $y): self
+    public function setY(int $y): self
     {
         $this->y = $y;
+        return $this;
+    }
+
+    public function getSizeX(): int
+    {
+        return $this->sizeX;
+    }
+
+    public function setSizeX(int $sizeX): self
+    {
+        $this->sizeX = $sizeX;
+        return $this;
+    }
+
+    public function getSizeY(): int
+    {
+        return $this->sizeY;
+    }
+
+    public function setSizeY(int $sizeY): self
+    {
+        $this->sizeY = $sizeY;
+        return $this;
+    }
+
+    public function getRotation(): int
+    {
+        return $this->rotation;
+    }
+
+    public function setRotation(int $rotation): self
+    {
+        $this->rotation = $rotation;
+        return $this;
+    }
+
+    public function getImagePath(): ?string
+    {
+        return $this->imagePath;
+    }
+
+    public function setImagePath(?string $imagePath): self
+    {
+        $this->imagePath = $imagePath;
         return $this;
     }
 
@@ -103,6 +163,17 @@ class Token
     public function setTemplateId(?string $templateId): self
     {
         $this->templateId = $templateId;
+        return $this;
+    }
+
+    public function getTokenType(): ?TokenType
+    {
+        return $this->tokenType;
+    }
+
+    public function setTokenType(?TokenType $tokenType): self
+    {
+        $this->tokenType = $tokenType;
         return $this;
     }
 }

@@ -376,6 +376,23 @@ body {
     overflow: auto;
 }
 
+.token-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.4rem 0;
+    border-bottom: 1px solid #444;
+}
+
+.token-thumb {
+    width: 32px;
+    height: 32px;
+    object-fit: contain;
+    background: #222;
+    border: 1px solid #555;
+    border-radius: 4px;
+}
+
 @media screen and (max-width: 1024px) {
     .session-layout {
         flex-direction: column;
@@ -397,4 +414,8 @@ body {
     flex-direction: column;
     align-items: center;
     justify-content: center;
+}
+
+.error {
+    color: red;
 }

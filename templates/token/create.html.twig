@@ -5,6 +5,19 @@
 
         {{ form_start(form, {action: path('token_create', {session: sessionId}), method: 'POST'}) }}
             {{ form_row(form.name) }}
+            {{ form_row(form.sizeX) }}
+            {{ form_row(form.sizeY) }}
+            {{ form_row(form.rotation) }}
+            {{ form_row(form.tokenType) }}
+            <div class="form-group">
+                {{ form_label(form.imageFile) }}
+                {{ form_widget(form.imageFile) }}
+                {% if form.imageFile.vars.errors|length > 0 %}
+                    <div class="error">
+                        {{ form_errors(form.imageFile) }}
+                    </div>
+                {% endif %}
+            </div>
 
             <button type="submit">Create</button>
         {{ form_end(form) }}

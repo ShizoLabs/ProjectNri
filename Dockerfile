@@ -13,13 +13,31 @@ FROM frankenphp_upstream AS frankenphp_base
 WORKDIR /app
 
 # persistent / runtime deps
+# добавляем dev-lib для сборки GD/Imagick с поддержкой webp/jpeg/png/freetype
 RUN apt-get update && apt-get install -y --no-install-recommends \
     file \
     git \
+    ca-certificates \
+    curl \
+    build-essential \
+    pkg-config \
+    zlib1g-dev \
+    libwebp-dev \
+    libjpeg-dev \
+    libpng-dev \
+    libfreetype6-dev \
+    libmagickwand-7.q16-dev \
+    imagemagick \
     && rm -rf /var/lib/apt/lists/*
 
 # PHP extensions
+# Конфигурируем GD чтобы собрать с webp/jpeg/freetype (если заголовки доступны),
+# затем ставим нужные расширения включая gd и imagick.
 RUN set -eux; \
+    # если available, подготовим конфиг для сборки gd
+    if command -v docker-php-ext-configure > /dev/null 2>&1; then \
+        docker-php-ext-configure gd --with-webp --with-jpeg --with-freetype || true; \
+    fi; \
     install-php-extensions \
         @composer \
         apcu \
@@ -27,6 +45,8 @@ RUN set -eux; \
         opcache \
         zip \
         mongodb \
+        gd \
+        imagick \
     ;
 
 ENV COMPOSER_ALLOW_SUPERUSER=1

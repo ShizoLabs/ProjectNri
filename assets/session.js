@@ -1,4 +1,4 @@
-// Scene to load some resources (currently not in use)
+// BootScene: lightweight loader. Use preload() only for global assets
 class BootScene extends Phaser.Scene {
     // Scene ID
     constructor() {
@@ -16,7 +16,7 @@ class BootScene extends Phaser.Scene {
 
 // Main scene
 class MainScene extends Phaser.Scene {
-    // ID
+    // Scene state: map dimensions, grid size, selected token holder
     constructor() {
         super({ key: 'MainScene' });
         this.mapWidth = 2000;
@@ -26,6 +26,7 @@ class MainScene extends Phaser.Scene {
     }
 
     create() {
+        // Read session map settings injected from server (window.SESSION_MAP)
         if (window.SESSION_MAP) {
             this.mapWidth = window.SESSION_MAP.width ?? this.mapWidth;
             this.mapHeight = window.SESSION_MAP.height ?? this.mapHeight;
@@ -34,58 +35,51 @@ class MainScene extends Phaser.Scene {
         // Map size in px
         const mapWidth = this.mapWidth;
         const mapHeight = this.mapHeight;
-        // Map
-        this.map = this.add.rectangle(
-            mapWidth / 2,
-            mapHeight / 2,
-            mapWidth,
-            mapHeight,
-            0xffffff
-        );
-        // Map as background
+        // Background rectangle used as visual map area; depth -1 so tokens render above it
+        this.map = this.add.rectangle(mapWidth / 2, mapHeight / 2, mapWidth, mapHeight, 0xffffff);
         this.map.setDepth(-1);
         /** -----GRID----- */
-        // Cell size in px
-        const gridSize = this.gridSize;
-        // Graphics for map cells
+        // Draw grid lines. Consider caching to texture if performance drops on large maps
+        const gridSize = this.gridSize; // Cell size in px
         const grid = this.add.graphics();
         grid.lineStyle(1, 0x888888, 0.5); // Line style
-        // Vertical lines
-        for (let x = 0; x <= mapWidth; x += gridSize) {
+        for (let x = 0; x <= mapWidth; x += gridSize) { // Vertical lines
             grid.moveTo(x, 0);
             grid.lineTo(x, mapHeight);
         }
-        // Horizonal lines
-        for (let y = 0; y <= mapHeight; y += gridSize) {
+        for (let y = 0; y <= mapHeight; y += gridSize) { // Horizonal lines
             grid.moveTo(0, y);
             grid.lineTo(mapWidth, y);
         }
-        // Apply lines to map
-        grid.strokePath();
-        // Grid as neutral layer
-        grid.setDepth(0);
+        grid.strokePath(); // Apply lines to map
+        grid.setDepth(0); // Grid as neutral layer
         this.gridLayer = grid;
         this.gridVisible = true;
         /** -----TOKENS----- */
-        // Group for all tokens
         this.tokensGroup = this.add.group();
-        // Add new token
-        if (window.SESSION_TOKENS) {
-            window.SESSION_TOKENS.forEach(data => {
-                const token = this.addToken(
-                    data.x,
-                    data.y,
-                    25,
-                    data.color ?? 0x0000ff
-                );
-                // Connect token with DB
-                token.tokenId = data.id;
-                token.tokenName = data.name;
-                token.mapId = window.SESSION_MAP?.id ?? null;
+        // Load token images if needed, then instantiate tokens from SESSION_TOKENS
+        const tokensData = Array.isArray(window.SESSION_TOKENS) ? window.SESSION_TOKENS : [];
+        const imagePaths = [...new Set(tokensData.map(data => data.imagePath).filter(Boolean))];
+        if (imagePaths.length > 0) {
+            imagePaths.forEach((path) => {
+                const key = this.getTextureKey(path);
+                if (!this.textures.exists(key)) {
+                    this.load.image(key, path);
+                }
+            });
+            this.load.once(Phaser.Loader.Events.COMPLETE, () => {
+                tokensData.forEach((data) => {
+                    this.addToken(data);
+                });
+            });
+            this.load.start();
+        } else {
+            tokensData.forEach((data) => {
+                this.addToken(data);
             });
         }
         /** -----CAMERA----- */
-        // Set cameras view
+        // Camera: bounds, zoom control (wheel) and panning via pointer drag (when not clicking objects)
         this.cameras.main.setBounds(0, 0, mapWidth, mapHeight);
         this.cameras.main.setZoom(1);
         this.isPanning = false;
@@ -124,59 +118,134 @@ class MainScene extends Phaser.Scene {
             this.lastPanPoint.set(pointer.x, pointer.y);
         });
     }
+    /** Generate a safe key for texture from image path. Be aware of key length and collisions for very long URLs. */ 
+    getTextureKey(imagePath) {
+        return `token-img-${btoa(imagePath).replace(/=+/g, '')}`;
+    }
+    /** Keep token label and outline positioned relative to token */
+    updateTokenAttachments(token) {
+        if (token.selectionOutline) {
+            token.selectionOutline.setPosition(token.x, token.y);
+        }
+        if (token.tokenLabel) {
+            const offsetY = (token.tokenSizeY ?? 50) / 2 + 6;
+            token.tokenLabel.setPosition(token.x, token.y + offsetY);
+        }
+    }
+    /** Show/hide token outline */
+    setTokenSelected(token, selected) {
+        if (token.selectionOutline) {
+            token.selectionOutline.setVisible(selected);
+        }
+    }
 
-    addToken(x, y, radius, color) {
+    addToken(data) {
+        // Normalize token input with defaults and safety limits
         const gs = this.gridSize;
         const mapW = this.mapWidth;
         const mapH = this.mapHeight;
+        const x = data.x ?? 0;
+        const y = data.y ?? 0;
+        const sizeX = Math.max(10, Number(data.sizeX ?? 50));
+        const sizeY = Math.max(10, Number(data.sizeY ?? 50));
+        const rotation = Number(data.rotation ?? 0);
+        const color = data.color ?? 0x0000ff;
 
-        const token = this.add.circle(x, y, radius, color).setInteractive({ draggable: true });
-        // Выбор токена при клике
+        let token;
+        // If image not loaded, schedule it and re-add token after loader completes
+        if (data.imagePath) {
+            const key = this.getTextureKey(data.imagePath);
+            if (!this.textures.exists(key)) {
+                this.load.image(key, data.imagePath);
+                this.load.once(Phaser.Loader.Events.COMPLETE, () => {
+                    this.addToken(data);
+                });
+                this.load.start();
+                return null;
+            }
+            token = this.add.image(x, y, key);
+            token.setDisplaySize(sizeX, sizeY);
+        } else {
+            token = this.add.ellipse(x, y, sizeX, sizeY, color);
+        }
+        // Make token draggable. For ellipse set a precise hitArea to match shape.
+        token.setRotation(Phaser.Math.DegToRad(rotation));
+        token.setInteractive({ draggable: true });
+        if (token.type === 'Ellipse') {
+            token.setInteractive(new Phaser.Geom.Ellipse(0, 0, sizeX, sizeY), Phaser.Geom.Ellipse.Contains);
+        }
+        // Create selection outline and label, set proper depths
+        token.tokenSizeX = sizeX;
+        token.tokenSizeY = sizeY;
+
+        token.selectionOutline = this.add.rectangle(x, y, sizeX + 8, sizeY + 8);
+        token.selectionOutline.setStrokeStyle(2, 0xffff00);
+        token.selectionOutline.setFillStyle(0, 0);
+        token.selectionOutline.setVisible(false);
+        token.selectionOutline.setDepth(1);
+
+        token.tokenLabel = this.add.text(x, y + sizeY / 2 + 6, data.name ?? '', {
+            fontSize: '12px',
+            color: '#ffffff',
+            backgroundColor: 'rgba(0,0,0,0.35)',
+            padding: { x: 4, y: 2 },
+        });
+        token.tokenLabel.setOrigin(0.5, 0);
+        token.tokenLabel.setDepth(2);
+        // Token select
         token.on('pointerdown', () => {
             this.selectToken(token);
         });
-        // Drag: ограничиваем по реальной карте
+        // Drag token. Limit token drag by map size
         token.on('drag', (pointer, dragX, dragY) => {
-            token.x = Phaser.Math.Clamp(dragX, radius, mapW - radius);
-            token.y = Phaser.Math.Clamp(dragY, radius, mapH - radius);
+            const halfW = sizeX / 2;
+            const halfH = sizeY / 2;
+            token.x = Phaser.Math.Clamp(dragX, halfW, mapW - halfW);
+            token.y = Phaser.Math.Clamp(dragY, halfH, mapH - halfH);
+            this.updateTokenAttachments(token);
         });
-        // Snap к центру ближайшей клетки при окончании drag
+        // On dragend snap to grid and persist new position via AJAX. Add error handling & CSRF token.
         token.on('dragend', () => {
             const snappedX = Math.round((token.x - gs / 2) / gs) * gs + gs / 2;
             const snappedY = Math.round((token.y - gs / 2) / gs) * gs + gs / 2;
-            // Присваиваем только если реально изменилось (избегаем лишних перерисовок)
+            // Change position only if was really moved
             if (Math.abs(snappedX - token.x) > 0.0001) token.x = snappedX;
             if (Math.abs(snappedY - token.y) > 0.0001) token.y = snappedY;
-            // Отправляем на сервер
+            this.updateTokenAttachments(token);
+            // Send new position to the server
             fetch(`/token/${token.tokenId}/move`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ x: token.x, y: token.y, mapId: token.mapId })
             });
         });
-
+        // Expose token.meta: tokenId, tokenName, mapId for later server calls
         this.tokensGroup.add(token);
+
+        token.tokenId = data.id;
+        token.tokenName = data.name ?? '';
+        token.mapId = window.SESSION_MAP?.id ?? data.mapId ?? null;
 
         return token;
     }
-
+    /** selectToken/deselectToken manage visual selection + camera follow */
     selectToken(token) {
         // Если выбран - то перевыбрать
         if (this.selectedToken) {
-            this.selectedToken.setStrokeStyle();
+            this.setTokenSelected(this.selectedToken, false);
         }
 
         this.selectedToken = token;
 
         // Визуальное выделение
-        token.setStrokeStyle(3, 0xffff00);
+        this.setTokenSelected(token, true);
 
         this.cameras.main.startFollow(token, true, 0.08, 0.08);
     }
-
+    /** selectToken/deselectToken manage visual selection + camera follow */
     deselectToken() {
         if (this.selectedToken) {
-            this.selectedToken.setStrokeStyle();
+            this.setTokenSelected(this.selectedToken, false);
         }
         this.selectedToken = null;
         this.cameras.main.stopFollow();
@@ -197,17 +266,16 @@ const config = {
     }
 };
 
-// Start the game
+// Phaser bootstrap: create the game instance with our scenes
 const game = new Phaser.Game(config);
 
 // Switch tabs
 $(document).ready(function() {
-    // Toggle maps list
+    // Toggle map list panel open/close
     $('#map-list-toggle').click(function() {
         $('#map-list-panel').toggleClass('is-open');
     });
-
-    // Switch map
+    // Switch map by reloading page with ?map=mapId (server uses GET param to select map)
     $(document).on('click', '.map-switch-btn', function() {
         const mapId = $(this).data('map-id');
         if (!mapId) {
@@ -216,12 +284,10 @@ $(document).ready(function() {
         const baseUrl = window.SESSION_OPEN_URL || `/session/${window.SESSION_ID}`;
         window.location.href = `${baseUrl}?map=${mapId}`;
     });
-
-    // Place token on the map
+    // Place token on map: server creates/updates token record (spawn) and returns token data, then we add to scene
     $('.token-place-btn').click(function() {
         const row = $(this).closest('.token-row');
         const tokenId = row.data('token-id');
-        const tokenName = row.data('token-name');
         const mapId = window.SESSION_MAP?.id;
 
         if (!tokenId || !mapId) {
@@ -241,13 +307,15 @@ $(document).ready(function() {
             if (!data || !data.id) {
                 return;
             }
-            const token = scene.addToken(startX, startY, 25, 0x0000ff);
-            token.tokenId = data.id;
-            token.tokenName = tokenName;
-            token.mapId = mapId;
+            scene.addToken({
+                ...data,
+                x: startX,
+                y: startY,
+                mapId,
+            });
         });
     });
-
+    // Switch tabs in controll menu (right side)
     $('.tab-btn').click(function() {
         const tabId = $(this).data('tab');
 
@@ -258,8 +326,7 @@ $(document).ready(function() {
 
         $('#' + tabId).show();
     });
-
-    // Map tools
+    // Map tool buttons: zoom, center, toggle grid, remove selected token (server call)
     $('.tool-btn').click(function() {
         const tool = $(this).data('tool');
         const scene = game.scene.keys.MainScene;
@@ -300,6 +367,12 @@ $(document).ready(function() {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' }
                 }).then(() => {
+                    if (token.tokenLabel) {
+                        token.tokenLabel.destroy();
+                    }
+                    if (token.selectionOutline) {
+                        token.selectionOutline.destroy();
+                    }
                     token.destroy();
                     scene.selectedToken = null;
                     scene.cameras.main.stopFollow();
