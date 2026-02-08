@@ -217,12 +217,13 @@ body {
     }
 }
 
-.modal-wrapper {
+.window-wrapper {
     display: flex;
 }
 
 #dialog-example {
     visibility: hidden;
+    /* видимость модального окна */
     margin: auto;
     font-size: 4rem;
     max-width: 40rem;
