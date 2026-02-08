@@ -117,6 +117,7 @@ final class TokenController extends AbstractController
             'x' => $token->getX(),
             'y' => $token->getY(),
             'mapId' => $token->getMapId(),
+            'templateId' => $token->getTemplateId(),
             'sizeX' => $token->getSizeX(),
             'sizeY' => $token->getSizeY(),
             'rotation' => $token->getRotation(),
@@ -133,7 +134,64 @@ final class TokenController extends AbstractController
             return $this->json(['error' => 'Token not found'], 404);
         }
 
+        if ($token->getTemplateId() === null && $token->getMapId() === null) {
+            $clones = $repo->findBy(['templateId' => $token->getId()]);
+            foreach ($clones as $clone) {
+                $dm->remove($clone);
+            }
+        }
+
         $dm->remove($token);
+        $dm->flush();
+
+        return $this->json(['ok' => true]);
+    }
+
+    #[Route('/token/{id}/update', name: 'token_update', methods: ['POST'])]
+    public function update(string $id, Request $request, DocumentManager $dm): JsonResponse
+    {
+        $repo = $dm->getRepository(Token::class);
+        $token = $repo->find($id);
+        if (!$token) {
+            return $this->json(['error' => 'Token not found'], 404);
+        }
+
+        $data = json_decode($request->getContent(), true);
+        if (!is_array($data)) {
+            return $this->json(['error' => 'Invalid payload'], 400);
+        }
+
+        if (array_key_exists('name', $data) && is_string($data['name'])) {
+            $token->setName($data['name']);
+        }
+        if (array_key_exists('sizeX', $data)) {
+            $token->setSizeX((int) $data['sizeX']);
+        }
+        if (array_key_exists('sizeY', $data)) {
+            $token->setSizeY((int) $data['sizeY']);
+        }
+        if (array_key_exists('rotation', $data)) {
+            $token->setRotation((int) $data['rotation']);
+        }
+        if (array_key_exists('imagePath', $data)) {
+            $token->setImagePath(is_string($data['imagePath']) ? $data['imagePath'] : null);
+        }
+
+        $dm->persist($token);
+
+        if ($token->getTemplateId() === null && $token->getMapId() === null) {
+            $clones = $repo->findBy(['templateId' => $token->getId()]);
+            foreach ($clones as $clone) {
+                $clone->setName($token->getName());
+                $clone->setSizeX($token->getSizeX());
+                $clone->setSizeY($token->getSizeY());
+                $clone->setRotation($token->getRotation());
+                $clone->setImagePath($token->getImagePath());
+                $clone->setTokenType($token->getTokenType());
+                $dm->persist($clone);
+            }
+        }
+
         $dm->flush();
 
         return $this->json(['ok' => true]);

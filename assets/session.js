@@ -213,10 +213,15 @@ class MainScene extends Phaser.Scene {
             if (Math.abs(snappedY - token.y) > 0.0001) token.y = snappedY;
             this.updateTokenAttachments(token);
             // Send new position to the server
-            fetch(`/token/${token.tokenId}/move`, {
+            $.ajax({
+                url: `/token/${token.tokenId}/move`,
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ x: token.x, y: token.y, mapId: token.mapId })
+                contentType: 'application/json',
+                data: JSON.stringify({ 
+                    x: token.x, 
+                    y: token.y, 
+                    mapId: token.mapId 
+                })
             });
         });
         // Expose token.meta: tokenId, tokenName, mapId for later server calls
@@ -225,6 +230,7 @@ class MainScene extends Phaser.Scene {
         token.tokenId = data.id;
         token.tokenName = data.name ?? '';
         token.mapId = window.SESSION_MAP?.id ?? data.mapId ?? null;
+        token.templateId = data.templateId ?? null;
 
         return token;
     }
@@ -299,20 +305,75 @@ $(document).ready(function() {
         const startX = Math.round(scene.mapWidth / 2 / gs) * gs + gs / 2;
         const startY = Math.round(scene.mapHeight / 2 / gs) * gs + gs / 2;
 
-        fetch(`/token/${tokenId}/spawn`, {
+        $.ajax({
+            url: `/token/${tokenId}/spawn`,
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ x: startX, y: startY, mapId })
-        }).then((res) => res.json()).then((data) => {
-            if (!data || !data.id) {
-                return;
+            contentType: 'application/json',
+            data: JSON.stringify({ x: startX, y: startY, mapId }),
+            dataType: 'json',
+            success: function(data) {
+                if (!data || !data.id) return;
+
+                scene.addToken({
+                    ...data,
+                    x: startX,
+                    y: startY,
+                    mapId,
+                });
+            },
+            error: function(xhr, status, error) {
+                console.error('Error spawning token', status, error);
             }
-            scene.addToken({
-                ...data,
-                x: startX,
-                y: startY,
-                mapId,
-            });
+        });
+    });
+
+    // Drag from list to map
+    $(document).on('dragstart', '.token-row', function(event) {
+        const tokenId = $(this).data('token-id');
+        if (!tokenId) {
+            return;
+        }
+        event.originalEvent.dataTransfer.setData('text/plain', String(tokenId));
+    });
+
+    $('#game-container').on('dragover', function(event) {
+        event.preventDefault();
+    });
+
+    $('#game-container').on('drop', function(event) {
+        event.preventDefault();
+        const tokenId = event.originalEvent.dataTransfer.getData('text/plain');
+        const mapId = window.SESSION_MAP?.id;
+        if (!tokenId || !mapId) {
+            return;
+        }
+
+        const scene = game.scene.keys.MainScene;
+        const camera = scene.cameras.main;
+        const rect = game.canvas.getBoundingClientRect();
+        const localX = event.originalEvent.clientX - rect.left;
+        const localY = event.originalEvent.clientY - rect.top;
+        const worldPoint = camera.getWorldPoint(localX, localY);
+
+        $.ajax({
+            url: `/token/${tokenId}/spawn`,
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ x: worldPoint.x, y: worldPoint.y, mapId }),
+            dataType: 'json',
+            success: function(data) {
+                if (!data || !data.id) return;
+
+                scene.addToken({
+                    ...data,
+                    x: worldPoint.x,
+                    y: worldPoint.y,
+                    mapId,
+                });
+            },
+            error: function(xhr, status, error) {
+                console.error('Error spawning token', status, error);
+            }
         });
     });
     // Switch tabs in controll menu (right side)
@@ -363,24 +424,62 @@ $(document).ready(function() {
                 if (!token || !token.tokenId) {
                     return;
                 }
-                fetch(`/token/${token.tokenId}/remove`, {
+                $.ajax({
+                    url: `/token/${token.tokenId}/remove`,
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                }).then(() => {
-                    if (token.tokenLabel) {
-                        token.tokenLabel.destroy();
+                    contentType: 'application/json',
+                    success: function() {
+                        if (token.tokenLabel) {
+                            token.tokenLabel.destroy();
+                        }
+                        if (token.selectionOutline) {
+                            token.selectionOutline.destroy();
+                        }
+                        token.destroy();
+                        scene.selectedToken = null;
+                        scene.cameras.main.stopFollow();
+                    },
+                    error: function(xhr, status, error) {
+                        console.error('Error removing token', status, error);
                     }
-                    if (token.selectionOutline) {
-                        token.selectionOutline.destroy();
-                    }
-                    token.destroy();
-                    scene.selectedToken = null;
-                    scene.cameras.main.stopFollow();
                 });
                 break;
             }
             default:
                 break;
         }
+    });
+
+    // Delete template token and all clones
+    $(document).on('click', '.token-delete-btn', function() {
+        const row = $(this).closest('.token-row');
+        const tokenId = row.data('token-id');
+        if (!tokenId) {
+            return;
+        }
+
+        $.ajax({
+            url: `/token/${tokenId}/remove`,
+            method: 'POST',
+            contentType: 'application/json',
+            success: function() {
+                row.remove();
+                const scene = game.scene.keys.MainScene;
+                if (!scene) return;
+
+                const children = scene.tokensGroup.getChildren();
+                for (let i = children.length - 1; i >= 0; i--) {
+                    const token = children[i];
+                    if (token.templateId === tokenId) {
+                        if (token.tokenLabel) token.tokenLabel.destroy();
+                        if (token.selectionOutline) token.selectionOutline.destroy();
+                        token.destroy();
+                    }
+                }
+            },
+            error: function(xhr, status, error) {
+                console.error('Error removing token', status, error);
+            }
+        });
     });
 });

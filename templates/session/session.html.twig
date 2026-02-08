@@ -73,12 +73,13 @@
                 </div>
                 <div>
                     {% for token in sessionTokens %}
-                        <div class="token-row" data-token-id="{{ token.id }}" data-token-name="{{ token.name }}">
+                        <div class="token-row" data-token-id="{{ token.id }}" data-token-name="{{ token.name }}" draggable="true">
                             {% if token.imagePath %}
                                 <img class="token-thumb" src="{{ asset(token.imagePath) }}" alt="{{ token.name }}">
                             {% endif %}
                             <span>{{ token.name }}</span>
                             <button class="token-place-btn" type="button">Add to map</button>
+                            <button class="token-delete-btn" type="button">Delete</button>
                         </div>
                     {% else %}
                         <span>No tokens</span>
