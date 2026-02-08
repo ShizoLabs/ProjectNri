@@ -20,15 +20,14 @@
     {% block importmap %}{{ importmap('app') }}{% endblock %}
     {% endblock %}
 </head>
-<div class="header">
-    {% block header %}
-    <div class="navbar">
 
+{% block header %}
+<div class="header">
+    <div class="navbar">
         <div class="logo">
             <img src="{{asset('images/logo.png')}}" alt="" id="image-logo">
             <label for="image-logo" id="phrase">Sos@l...</label>
             <label for="phrase" id="disc">Games of future!</label>
-
         </div>
         <div class="navigation">
             <a href="">Workshop</a>
@@ -38,25 +37,21 @@
         </div>
     </div>
 </div>
-
-<dialog open id="dialog-example" >
-    <form method="dialog">
-        <p>Я люблю Яну</p>
-        <p>Я люблю Яну</p>
-        <p>Я люблю Яну</p>
-        <p>Я люблю Яну</p>
-        <p>Я люблю Яну</p>
-        <menu>
-            <button value="cancel">Закрыть</button>
-            <button id="confirmBtn" value="default">СОсал?</button>
-        </menu>
-    </form>
-</dialog>
 {% endblock %}
 
+{% block modal %}
+<div class="moodal-wrapper">
+    <dialog open id="dialog-example">
+        <form method="dialog" class="dialog-form">
+            <p>Lorem ipsum dolor sit amet consectetur </p>
+            <menu>
+                <button value="cancel">Close</button>
+                <button id="confirmBtn" value="default">Suck?</button>
+            </menu>
+        </form>
+    </dialog>
 </div>
-
-
+{% endblock %}
 
 <body>
     {% block body %}
