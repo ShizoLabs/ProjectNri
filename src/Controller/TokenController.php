@@ -139,12 +139,84 @@ final class TokenController extends AbstractController
             foreach ($clones as $clone) {
                 $dm->remove($clone);
             }
+
+            $imagePath = $token->getImagePath();
+            if (is_string($imagePath) && $imagePath !== '') {
+                $projectDir = $this->getParameter('kernel.project_dir');
+                $relativePath = ltrim($imagePath, '/');
+                $fullPath = $projectDir . '/public/' . $relativePath;
+                if (str_starts_with($relativePath, 'uploads/tokens/') && is_file($fullPath)) {
+                    @unlink($fullPath);
+                }
+            }
         }
 
         $dm->remove($token);
         $dm->flush();
 
         return $this->json(['ok' => true]);
+    }
+
+    #[Route('/token/{id}/edit', name: 'token_edit', methods: ['GET', 'POST'])]
+    public function edit(string $id, Request $request, DocumentManager $dm): Response
+    {
+        $repo = $dm->getRepository(Token::class);
+        $token = $repo->find($id);
+        if (!$token) {
+            return $this->json(['error' => 'Token not found'], 404);
+        }
+
+        $sessionId = $request->query->get('session');
+        $form = $this->createForm(TokenFormType::class, $token);
+        $form->handleRequest($request);
+
+        if ($form->isSubmitted() && $form->isValid()) {
+            $imageFile = $form->get('imageFile')->getData();
+            if ($imageFile) {
+                $projectDir = $this->getParameter('kernel.project_dir');
+                $uploadDir = $projectDir . '/public/uploads/tokens';
+                if (!is_dir($uploadDir)) {
+                    mkdir($uploadDir, 0775, true);
+                }
+
+                $extension = $imageFile->guessExtension() ?: 'bin';
+                $newFilename = uniqid('token_', true) . '.' . $extension;
+                $imageFile->move($uploadDir, $newFilename);
+                $token->setImagePath('/uploads/tokens/' . $newFilename);
+            }
+
+            $dm->persist($token);
+
+            if ($token->getTemplateId() === null && $token->getMapId() === null) {
+                $clones = $repo->findBy(['templateId' => $token->getId()]);
+                foreach ($clones as $clone) {
+                    $clone->setName($token->getName());
+                    $clone->setSizeX($token->getSizeX());
+                    $clone->setSizeY($token->getSizeY());
+                    $clone->setRotation($token->getRotation());
+                    $clone->setImagePath($token->getImagePath());
+                    $clone->setTokenType($token->getTokenType());
+                    $dm->persist($clone);
+                }
+            }
+
+            $dm->flush();
+
+            if (is_string($sessionId) && $sessionId !== '') {
+                return $this->json([
+                    'success' => true,
+                    'redirect' => $this->generateUrl('session_open', ['id' => $sessionId]),
+                ]);
+            }
+
+            return $this->json(['success' => true, 'redirect' => $this->generateUrl('session_index')]);
+        }
+
+        return $this->render('token/edit.html.twig', [
+            'form' => $form->createView(),
+            'sessionId' => $sessionId,
+            'tokenId' => $token->getId(),
+        ]);
     }
 
     #[Route('/token/{id}/update', name: 'token_update', methods: ['POST'])]

@@ -79,6 +79,7 @@
                             {% endif %}
                             <span>{{ token.name }}</span>
                             <button class="token-place-btn" type="button">Add to map</button>
+                            <button class="modal token-edit-btn" type="button" data-href="{{ path('token_edit', {id: token.id, session: sessionId}) }}">Edit</button>
                             <button class="token-delete-btn" type="button">Delete</button>
                         </div>
                     {% else %}

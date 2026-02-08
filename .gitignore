@@ -13,6 +13,7 @@
 
 ###> symfony/asset-mapper ###
 /public/assets/
+/public/uploads
 /assets/vendor/
 ###< symfony/asset-mapper ###
 

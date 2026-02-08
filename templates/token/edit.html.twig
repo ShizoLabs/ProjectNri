@@ -1,0 +1,16 @@
+{% extends 'modalContent.html.twig' %}
+
+{% block modalContent %}
+        <h1>Edit Token</h1>
+
+        {{ form_start(form, {action: path('token_edit', {id: tokenId, session: sessionId}), method: 'POST'}) }}
+            {{ form_row(form.name) }}
+            {{ form_row(form.sizeX) }}
+            {{ form_row(form.sizeY) }}
+            {{ form_row(form.rotation) }}
+            {{ form_row(form.tokenType) }}
+            {{ form_row(form.imageFile) }}
+
+            <button type="submit">Update</button>
+        {{ form_end(form) }}
+{% endblock %}
