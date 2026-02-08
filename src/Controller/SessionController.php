@@ -42,10 +42,22 @@ final class SessionController extends AbstractController
             $map->setSessionId($session->getId());
             $dm->persist($map);
             $dm->flush();
-
+            // If AJAX
+            if ($request->isXmlHttpRequest()) {
+                return $this->json([
+                    'success' => true,
+                    'redirect' => $this->generateUrl('session_index')
+                ]);
+            }
+            
             return $this->redirectToRoute('session_index');
         }
-
+        // If invalid AJAX
+        if ($request->isXmlHttpRequest()) {
+            return $this->render('session/create.html.twig', [
+                'form' => $form->createView(),
+            ]);
+        }
         return $this->render('session/create.html.twig', [
             'form' => $form->createView(),
         ]);

@@ -1,0 +1,33 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Hello WorkshopController!{% endblock %}
+
+{% block body %}
+<div class="index-workshop-content">
+    <h1>Workshop</h1>
+
+    <div class="modal" data-href="{{ path('workshop_system_create') }}">
+        <span>Create new system</span>
+    </div>
+
+    {% if systems is empty %}
+        <p>No game systems yet.</p>
+    {% else %}
+        <ul class="system-list">
+            {% for system in systems %}
+                <li>
+                    <a href="{{ path('workshop_system_open', {id: system.id}) }}">
+                        {{ system.name }}
+                    </a>
+                    <div class="system-actions">
+                        <button class="modal" type="button" data-href="{{ path('workshop_system_edit', {id: system.id}) }}">Update</button>
+                        <form method="post" action="{{ path('workshop_system_delete', {id: system.id}) }}" onsubmit="return confirm('Delete this system?');">
+                            <button type="submit">Delete</button>
+                        </form>
+                    </div>
+                </li>
+            {% endfor %}
+        </ul>
+    {% endif %}
+</div>
+{% endblock %}
