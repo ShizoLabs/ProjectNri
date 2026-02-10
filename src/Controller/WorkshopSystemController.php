@@ -6,6 +6,7 @@ use App\Document\WorkshopSystem;
 use App\Form\WorkshopSystemType;
 use Doctrine\ODM\MongoDB\DocumentManager;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\Form\FormError;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -26,6 +27,12 @@ final class WorkshopSystemController extends AbstractController
 
         $form = $this->createForm(WorkshopSystemType::class, $system);
         $form->handleRequest($request);
+
+        if ($form->isSubmitted()) {
+            foreach ($system->validateCollections() as $error) {
+                $form->addError(new FormError($error));
+            }
+        }
 
         if ($form->isSubmitted() && $form->isValid()) {
             $dm->persist($system);
@@ -66,6 +73,12 @@ final class WorkshopSystemController extends AbstractController
         $form = $this->createForm(WorkshopSystemType::class, $system);
         $form->handleRequest($request);
 
+        if ($form->isSubmitted()) {
+            foreach ($system->validateCollections() as $error) {
+                $form->addError(new FormError($error));
+            }
+        }
+
         if ($form->isSubmitted() && $form->isValid()) {
             $dm->persist($system);
             $dm->flush();
@@ -83,6 +96,7 @@ final class WorkshopSystemController extends AbstractController
         return $this->render('workshopSystem/edit.html.twig', [
             'form' => $form->createView(),
             'systemId' => $system->getId(),
+            'system' => $system,
         ]);
     }
 

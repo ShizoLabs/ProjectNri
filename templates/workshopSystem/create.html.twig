@@ -3,7 +3,10 @@
 {% block modalContent %}
     <h1>Create Workshop System</h1>
     {{ form_start(form, {action: path('workshop_system_create'), method: 'POST'}) }}
+        {{ form_errors(form) }}
         {{ form_row(form.name) }}
+        {{ form_row(form.slug) }}
+        {{ form_row(form.version) }}
 
         <button type="submit">Create</button>
     {{ form_end(form) }}

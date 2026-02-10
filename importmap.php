@@ -20,4 +20,8 @@ return [
         'path' => './assets/session.js',
         'entrypoint' => true,
     ],
+    'workshopSystem' => [
+        'path' => './assets/workshopSystem.js',
+        'entrypoint' => true,
+    ],
 ];

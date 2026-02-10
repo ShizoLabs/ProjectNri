@@ -1,10 +1,49 @@
-{% extends 'modalContent.html.twig' %}
+{% extends 'base.html.twig' %}
 
-{% block modalContent %}
-    <h1>Update Workshop System</h1>
+{% block title %}Edit Workshop System{% endblock %}
+
+{% block javascripts %}
+{{ parent() }}
+<script>
+    window.WORKSHOP_SYSTEM = {{ {
+        id: system.id,
+        name: system.name,
+        slug: system.slug,
+        version: system.version,
+        settings: system.settings,
+        resources: system.resources,
+        tabs: system.tabs,
+        formulas: system.formulas,
+        meta: system.meta
+    }|json_encode|raw }};
+</script>
+{{ importmap('workshopSystem') }}
+{% endblock %}
+
+{% block body %}
+<div class="workshop-system-content">
+    <div class="workshop-system-header">
+        <div>
+            <h1>Edit {{ system.name }}</h1>
+            {% if system.slug %}
+                <div class="workshop-system-subtitle">Slug: {{ system.slug }}</div>
+            {% endif %}
+            <div class="workshop-system-subtitle">Version: {{ system.version }}</div>
+        </div>
+        <a class="workshop-system-back" href="{{ path('workshop_index') }}">Back to Workshop</a>
+    </div>
+
     {{ form_start(form, {action: path('workshop_system_edit', {id: systemId}), method: 'POST'}) }}
-        {{ form_row(form.name) }}
+        {{ form_errors(form) }}
+        <div class="workshop-system-fields">
+            {{ form_row(form.name) }}
+            {{ form_row(form.slug) }}
+            {{ form_row(form.version) }}
+        </div>
 
-        <button type="submit">Update</button>
+        {% include 'workshopSystem/_builder.html.twig' with { system: system, editable: true, form: form } %}
+
+        <button class="workshop-save-btn" type="submit">Save changes</button>
     {{ form_end(form) }}
+</div>
 {% endblock %}

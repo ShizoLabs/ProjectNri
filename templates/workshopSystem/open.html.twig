@@ -2,10 +2,40 @@
 
 {% block title %}Workshop System{% endblock %}
 
+{% block javascripts %}
+{{ parent() }}
+<script>
+    window.WORKSHOP_SYSTEM = {{ {
+        id: system.id,
+        name: system.name,
+        slug: system.slug,
+        version: system.version,
+        settings: system.settings,
+        resources: system.resources,
+        tabs: system.tabs,
+        formulas: system.formulas,
+        meta: system.meta
+    }|json_encode|raw }};
+</script>
+{{ importmap('workshopSystem') }}
+{% endblock %}
+
 {% block body %}
 <div class="workshop-system-content">
-    <h1>{{ system.name }}</h1>
-    <p>System created in Workshop.</p>
-    <a href="{{ path('workshop_index') }}">Back to Workshop</a>
+    <div class="workshop-system-header">
+        <div>
+            <h1>{{ system.name }}</h1>
+            {% if system.slug %}
+                <div class="workshop-system-subtitle">Slug: {{ system.slug }}</div>
+            {% endif %}
+            <div class="workshop-system-subtitle">Version: {{ system.version }}</div>
+        </div>
+        <div class="workshop-system-actions">
+            <a class="workshop-system-back" href="{{ path('workshop_index') }}">Back to Workshop</a>
+            <a class="workshop-system-back" href="{{ path('workshop_system_edit', {id: system.id}) }}">Edit system</a>
+        </div>
+    </div>
+
+    {% include 'workshopSystem/_builder.html.twig' with { system: system, editable: false } %}
 </div>
 {% endblock %}
