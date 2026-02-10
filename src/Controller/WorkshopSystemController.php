@@ -28,6 +28,8 @@ final class WorkshopSystemController extends AbstractController
         $form = $this->createForm(WorkshopSystemType::class, $system);
         $form->handleRequest($request);
 
+        $system->ensureDefaultTab();
+
         if ($form->isSubmitted()) {
             foreach ($system->validateCollections() as $error) {
                 $form->addError(new FormError($error));
@@ -72,6 +74,8 @@ final class WorkshopSystemController extends AbstractController
 
         $form = $this->createForm(WorkshopSystemType::class, $system);
         $form->handleRequest($request);
+
+        $system->ensureDefaultTab();
 
         if ($form->isSubmitted()) {
             foreach ($system->validateCollections() as $error) {

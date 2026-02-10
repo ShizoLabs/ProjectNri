@@ -164,6 +164,20 @@ class WorkshopSystem
         return $this;
     }
 
+    public function ensureDefaultTab(): void
+    {
+        if (!empty($this->tabs)) {
+            return;
+        }
+
+        $this->tabs = [[
+            'id' => $this->generateTabId(),
+            'name' => 'Tab 1',
+            'order' => 0,
+            'resources' => [],
+        ]];
+    }
+
     public function validateCollections(): array
     {
         $errors = [];
@@ -176,18 +190,74 @@ class WorkshopSystem
             $errors[] = 'Version must be 1 or higher.';
         }
 
-        $resourceIds = [];
+        if (empty($this->tabs)) {
+            $errors[] = 'At least one tab is required.';
+        }
+
+        $tabIds = [];
+        foreach ($this->tabs as $index => $tab) {
+            if (!is_array($tab)) {
+                $errors[] = sprintf('Tab #%d must be an object.', $index + 1);
+                continue;
+            }
+
+            if (!$this->isNonEmptyString($tab['id'] ?? null)) {
+                $errors[] = sprintf('Tab #%d requires a non-empty id.', $index + 1);
+            } else {
+                $tabIds[] = $tab['id'];
+            }
+
+            if (!$this->isNonEmptyString($tab['name'] ?? null)) {
+                $errors[] = sprintf('Tab #%d requires a name.', $index + 1);
+            }
+
+            if (isset($tab['resources']) && !is_array($tab['resources'])) {
+                $errors[] = sprintf('Tab #%d resources must be a list.', $index + 1);
+                continue;
+            }
+
+            foreach (($tab['resources'] ?? []) as $resourceIndex => $resource) {
+                if (!is_array($resource)) {
+                    $errors[] = sprintf('Tab #%d resource #%d must be an object.', $index + 1, $resourceIndex + 1);
+                    continue;
+                }
+
+                if (!$this->isNonEmptyString($resource['id'] ?? null)) {
+                    $errors[] = sprintf('Tab #%d resource #%d requires an id.', $index + 1, $resourceIndex + 1);
+                }
+
+                if (!$this->isNonEmptyString($resource['name'] ?? null)) {
+                    $errors[] = sprintf('Tab #%d resource #%d requires a name.', $index + 1, $resourceIndex + 1);
+                }
+
+                if (!$this->isNonEmptyString($resource['type'] ?? null)) {
+                    $errors[] = sprintf('Tab #%d resource #%d requires a type.', $index + 1, $resourceIndex + 1);
+                }
+
+                $position = $resource['position'] ?? null;
+                if (!is_array($position)) {
+                    $errors[] = sprintf('Tab #%d resource #%d requires a position.', $index + 1, $resourceIndex + 1);
+                    continue;
+                }
+
+                $column = $position['column'] ?? null;
+                if (!is_int($column) && !is_numeric($column)) {
+                    $errors[] = sprintf('Tab #%d resource #%d position column must be numeric.', $index + 1, $resourceIndex + 1);
+                } elseif ((int) $column < 0 || (int) $column > 1) {
+                    $errors[] = sprintf('Tab #%d resource #%d position column must be 0 or 1.', $index + 1, $resourceIndex + 1);
+                }
+
+                $order = $position['order'] ?? null;
+                if (!is_int($order) && !is_numeric($order)) {
+                    $errors[] = sprintf('Tab #%d resource #%d position order must be numeric.', $index + 1, $resourceIndex + 1);
+                }
+            }
+        }
+
         foreach ($this->resources as $index => $resource) {
             if (!is_array($resource)) {
                 $errors[] = sprintf('Resource #%d must be an object.', $index + 1);
                 continue;
-            }
-
-            $id = $resource['id'] ?? null;
-            if (!$this->isNonEmptyString($id)) {
-                $errors[] = sprintf('Resource #%d requires a non-empty id.', $index + 1);
-            } else {
-                $resourceIds[] = $id;
             }
 
             if (!$this->isNonEmptyString($resource['name'] ?? null)) {
@@ -198,54 +268,22 @@ class WorkshopSystem
                 $errors[] = sprintf('Resource #%d requires a type.', $index + 1);
             }
 
-            if (isset($resource['data']) && !is_array($resource['data'])) {
-                $errors[] = sprintf('Resource #%d data must be an object.', $index + 1);
-            }
-        }
-
-        foreach ($this->tabs as $index => $tab) {
-            if (!is_array($tab)) {
-                $errors[] = sprintf('Tab #%d must be an object.', $index + 1);
-                continue;
+            if (!$this->isNonEmptyString($resource['tabId'] ?? null)) {
+                $errors[] = sprintf('Resource #%d requires a tab id.', $index + 1);
+            } elseif (!empty($tabIds) && !in_array($resource['tabId'], $tabIds, true)) {
+                $errors[] = sprintf('Resource #%d references an unknown tab.', $index + 1);
             }
 
-            if (!$this->isNonEmptyString($tab['id'] ?? null)) {
-                $errors[] = sprintf('Tab #%d requires a non-empty id.', $index + 1);
+            $column = $resource['column'] ?? null;
+            if (!is_int($column) && !is_numeric($column)) {
+                $errors[] = sprintf('Resource #%d column must be numeric.', $index + 1);
+            } elseif ((int) $column < 0 || (int) $column > 1) {
+                $errors[] = sprintf('Resource #%d column must be 0 or 1.', $index + 1);
             }
 
-            if (!$this->isNonEmptyString($tab['name'] ?? null)) {
-                $errors[] = sprintf('Tab #%d requires a name.', $index + 1);
-            }
-
-            if (isset($tab['elements']) && !is_array($tab['elements'])) {
-                $errors[] = sprintf('Tab #%d elements must be a list.', $index + 1);
-                continue;
-            }
-
-            foreach (($tab['elements'] ?? []) as $elementIndex => $element) {
-                if (!is_array($element)) {
-                    $errors[] = sprintf('Tab #%d element #%d must be an object.', $index + 1, $elementIndex + 1);
-                    continue;
-                }
-
-                if (!$this->isNonEmptyString($element['id'] ?? null)) {
-                    $errors[] = sprintf('Tab #%d element #%d requires an id.', $index + 1, $elementIndex + 1);
-                }
-
-                $resourceId = $element['resourceId'] ?? null;
-                if (!$this->isNonEmptyString($resourceId)) {
-                    $errors[] = sprintf('Tab #%d element #%d requires a resource id.', $index + 1, $elementIndex + 1);
-                } elseif (!empty($resourceIds) && !in_array($resourceId, $resourceIds, true)) {
-                    $errors[] = sprintf('Tab #%d element #%d references an unknown resource.', $index + 1, $elementIndex + 1);
-                }
-
-                if (isset($element['x']) && !is_numeric($element['x'])) {
-                    $errors[] = sprintf('Tab #%d element #%d position X must be numeric.', $index + 1, $elementIndex + 1);
-                }
-
-                if (isset($element['y']) && !is_numeric($element['y'])) {
-                    $errors[] = sprintf('Tab #%d element #%d position Y must be numeric.', $index + 1, $elementIndex + 1);
-                }
+            $order = $resource['order'] ?? null;
+            if (!is_int($order) && !is_numeric($order)) {
+                $errors[] = sprintf('Resource #%d order must be numeric.', $index + 1);
             }
         }
 
@@ -274,6 +312,15 @@ class WorkshopSystem
     private function isNonEmptyString(mixed $value): bool
     {
         return is_string($value) && trim($value) !== '';
+    }
+
+    private function generateTabId(): string
+    {
+        try {
+            return 'tab-' . bin2hex(random_bytes(6));
+        } catch (\Throwable $e) {
+            return 'tab-' . uniqid('', true);
+        }
     }
 
     #[ODM\PreUpdate]

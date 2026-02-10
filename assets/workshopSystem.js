@@ -1,92 +1,86 @@
-// Ищем корневой элемент билдера по data-атрибуту
 const root = document.querySelector('[data-workshop-builder]');
 
 if (root) {
-    const editable = root.dataset.editable === 'true'; // Можно ли редактировать
-    const payload = window.WORKSHOP_SYSTEM ?? {}; // Данные из начального объекта
-    // Нормализуем ресурсы и вкладки
-    const resources = normalizeResources(payload.resources);
-    const tabs = normalizeTabs(payload.tabs, resources);
-    // Основное состояние билдера
+    const editable = root.dataset.editable === 'true';
+    const payload = window.WORKSHOP_SYSTEM ?? {};
+
+    const legacyResourceMap = buildLegacyResourceMap(payload.resources);
+    const tabs = normalizeTabs(payload.tabs, legacyResourceMap);
+    if (tabs.length === 0) {
+        tabs.push(createDefaultTab('Tab 1', 0));
+    }
+
     const state = {
         settings: payload.settings ?? {},
-        resources,
         tabs,
         formulas: Array.isArray(payload.formulas) ? payload.formulas : [],
         meta: payload.meta ?? {},
     };
-    // Активная вкладка — по умолчанию первая
-    let activeTabId = state.tabs[0]?.id ?? null;
-    // Сюда собираем скрытые поля формы (для сериализации JSON перед отправкой)
-    const fields = {};
-    $('[data-workshop-field]').each(function () {
-        const key = $(this).data('workshop-field'); // автоматически преобразует data-workshop-field
-        fields[key] = this; // сохраняем сам DOM-элемент
-    });
-    // ---------------------------
-    // НОРМАЛИЗАЦИЯ ДАННЫХ
-    // ---------------------------
-    /** Нормализация ресурсов */
-    function normalizeResources(list) {
-        // Чек если массив
-        if (!Array.isArray(list)) {
-            return [];
-        }
 
-        return list.map((resource) => {
-            const safe = isPlainObject(resource) ? resource : {};
-            if (!isNonEmptyString(safe.id)) { // Гарантируем id
-                safe.id = createId('res');
-            }
-            if (!isNonEmptyString(safe.name)) { // Гарантируем имя
-                safe.name = 'Resource';
-            }
-            if (!isNonEmptyString(safe.type)) { // Тип по умолчанию — text
-                safe.type = 'text';
-            }
-            if (!isPlainObject(safe.data) && !Array.isArray(safe.data)) { // Гарантируем корректный data-объект
-                safe.data = { value: '' };
-            }
-            return safe;
-        });
-    }
-    /** Нормализация вкладок */
-    function normalizeTabs(list, resourcesList) {
+    let activeTabId = state.tabs[0]?.id ?? null;
+    let dragState = null;
+
+    const fields = {};
+    document.querySelectorAll('[data-workshop-field]').forEach((field) => {
+        fields[field.dataset.workshopField] = field;
+    });
+
+    function normalizeTabs(list, legacyMap) {
         if (!Array.isArray(list)) {
             return [];
         }
 
         return list.map((tab, index) => {
             const safe = isPlainObject(tab) ? tab : {};
-            if (!isNonEmptyString(safe.id)) { // Гарантируем id вкладки
+            if (!isNonEmptyString(safe.id)) {
                 safe.id = createId('tab');
             }
-            if (!isNonEmptyString(safe.name)) { // Если нет имени — создаём "Tab 1", "Tab 2" и т.д.
+            if (!isNonEmptyString(safe.name)) {
                 safe.name = `Tab ${index + 1}`;
             }
-            safe.order = Number.isInteger(safe.order) ? safe.order : index; // Порядок вкладки
-            safe.elements = Array.isArray(safe.elements) ? safe.elements : []; // Элементы вкладки
-            safe.elements = safe.elements.map((element) => normalizeElement(element, resourcesList));
+            safe.order = Number.isInteger(safe.order) ? safe.order : index;
+            safe.resources = Array.isArray(safe.resources) ? safe.resources : [];
+            if (safe.resources.length === 0 && Array.isArray(safe.elements)) {
+                safe.resources = safe.elements.map((element, elementIndex) => {
+                    const legacy = legacyMap[element.resourceId] ?? {};
+                    return normalizeResource(
+                        {
+                            id: element.id ?? createId('res'),
+                            name: legacy.name ?? `Resource ${elementIndex + 1}`,
+                            type: legacy.type ?? 'text',
+                            position: { column: 0, order: elementIndex },
+                        },
+                        elementIndex
+                    );
+                });
+            } else {
+                safe.resources = safe.resources.map((resource, resourceIndex) => normalizeResource(resource, resourceIndex));
+            }
+            if (safe.elements) {
+                delete safe.elements;
+            }
             return safe;
         });
     }
-    /** Нормализация элементов */
-    function normalizeElement(element, resourcesList) {
-        const safe = isPlainObject(element) ? element : {};
-        if (!isNonEmptyString(safe.id)) { // Гарантируем id элемента
-            safe.id = createId('el');
+
+    function normalizeResource(resource, resourceIndex) {
+        const safe = isPlainObject(resource) ? resource : {};
+        if (!isNonEmptyString(safe.id)) {
+            safe.id = createId('res');
         }
-        if (!isNonEmptyString(safe.resourceId)) { // Если resourceId не указан — ставим первый ресурс
-            safe.resourceId = resourcesList[0]?.id ?? '';
+        if (!isNonEmptyString(safe.name)) {
+            safe.name = 'Resource';
         }
-        // Координаты элемента (позиция на листе)
-        safe.x = isNumeric(safe.x) ? Number(safe.x) : 0;
-        safe.y = isNumeric(safe.y) ? Number(safe.y) : 0;
+        if (!isNonEmptyString(safe.type)) {
+            safe.type = 'text';
+        }
+        const position = isPlainObject(safe.position) ? safe.position : {};
+        const column = position.column === 1 ? 1 : 0;
+        const order = isNumeric(position.order) ? Number(position.order) : resourceIndex;
+        safe.position = { column, order };
         return safe;
     }
-    // ---------------------------
-    // ВСПОМОГАТЕЛЬНЫЕ ПРОВЕРКИ
-    // ---------------------------
+
     function isPlainObject(value) {
         return typeof value === 'object' && value !== null && !Array.isArray(value);
     }
@@ -98,34 +92,56 @@ if (root) {
     function isNumeric(value) {
         return value !== null && value !== '' && !Number.isNaN(Number(value));
     }
-    // Создание уникального id (UUID если поддерживается браузером)
+
     function createId(prefix) {
         if (window.crypto?.randomUUID) {
             return `${prefix}-${window.crypto.randomUUID()}`;
         }
         return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
     }
-    // ---------------------------
-    // УПРАВЛЕНИЕ ВКЛАДКАМИ
-    // ---------------------------
+
+    function buildLegacyResourceMap(list) {
+        const map = {};
+        if (!Array.isArray(list)) {
+            return map;
+        }
+        list.forEach((resource) => {
+            if (!isPlainObject(resource) || !isNonEmptyString(resource.id)) {
+                return;
+            }
+            map[resource.id] = {
+                name: isNonEmptyString(resource.name) ? resource.name : 'Resource',
+                type: isNonEmptyString(resource.type) ? resource.type : 'text',
+            };
+        });
+        return map;
+    }
+
+    function createDefaultTab(name, order) {
+        return {
+            id: createId('tab'),
+            name: name ?? 'Tab',
+            order: Number.isInteger(order) ? order : 0,
+            resources: [],
+        };
+    }
+
+    function getActiveTab() {
+        return state.tabs.find((tab) => tab.id === activeTabId) ?? null;
+    }
+
     function setActiveTab(tabId) {
         activeTabId = tabId;
         renderTabsBar();
         renderTabPanel();
     }
 
-    function getActiveTab() {
-        return state.tabs.find((tab) => tab.id === activeTabId) ?? null;
-    }
-    // ---------------------------
-    // СИНХРОНИЗАЦИЯ С ФОРМОЙ
-    // ---------------------------
     function syncFields() {
         if (fields.settings) {
             fields.settings.value = JSON.stringify(state.settings ?? {});
         }
         if (fields.resources) {
-            fields.resources.value = JSON.stringify(state.resources ?? []);
+            fields.resources.value = JSON.stringify(flattenResources(state.tabs));
         }
         if (fields.tabs) {
             fields.tabs.value = JSON.stringify(state.tabs ?? []);
@@ -137,16 +153,13 @@ if (root) {
             fields.meta.value = JSON.stringify(state.meta ?? {});
         }
     }
-    // Главный render — перерисовывает всё
+
     function render() {
         renderTabsBar();
         renderTabPanel();
-        renderResourcesPanel();
-        syncFields(); // после любого рендера синхронизируем данные
+        syncFields();
     }
-    // ---------------------------
-    // RENDER: Панель вкладок
-    // ---------------------------
+
     function renderTabsBar() {
         const tabsBar = root.querySelector('[data-tabs-bar]');
         if (!tabsBar) {
@@ -154,7 +167,6 @@ if (root) {
         }
 
         tabsBar.innerHTML = '';
-        // Если вкладок нет — показываем сообщение
         if (state.tabs.length === 0) {
             const empty = document.createElement('div');
             empty.className = 'workshop-empty';
@@ -162,7 +174,7 @@ if (root) {
             tabsBar.appendChild(empty);
             return;
         }
-        // Создаём кнопку для каждой вкладки
+
         state.tabs.forEach((tab) => {
             const btn = document.createElement('button');
             btn.type = 'button';
@@ -173,9 +185,7 @@ if (root) {
             tabsBar.appendChild(btn);
         });
     }
-    // ---------------------------
-    // RENDER: Панель текущей вкладки
-    // ---------------------------
+
     function renderTabPanel() {
         const panel = root.querySelector('[data-tab-panel]');
         if (!panel) {
@@ -184,15 +194,14 @@ if (root) {
 
         panel.innerHTML = '';
         const tab = getActiveTab();
-        // Если вкладка не выбрана
         if (!tab) {
             const empty = document.createElement('div');
             empty.className = 'workshop-empty';
-            empty.textContent = 'Select a tab to edit its elements.';
+            empty.textContent = 'Select a tab to edit its resources.';
             panel.appendChild(empty);
             return;
         }
-        // Заголовок вкладки
+
         const header = document.createElement('div');
         header.className = 'workshop-tab-header';
 
@@ -223,385 +232,364 @@ if (root) {
         }
 
         panel.appendChild(header);
-        // Элементы вкладки
-        const elementsWrapper = document.createElement('div');
-        elementsWrapper.className = 'workshop-elements';
-        // Если у вкладки нет элементов — показываем заглушку
-        if (tab.elements.length === 0) {
-            const empty = document.createElement('div');
-            empty.className = 'workshop-empty';
-            empty.textContent = 'No elements in this tab.';
-            elementsWrapper.appendChild(empty);
-        } else {
-            // Если элементы есть — создаём строку для каждого
-            tab.elements.forEach((element) => {
-                // Контейнер одной строки элемента
-                const row = document.createElement('div');
-                row.className = 'workshop-element-row';
-                // -----------------------------
-                // SELECT: выбор ресурса
-                // -----------------------------
-                const resourceSelect = document.createElement('select');
-                // data-атрибуты используются потом в обработчике событий
-                resourceSelect.dataset.field = 'element-resource';
-                resourceSelect.dataset.elementId = element.id;
-                resourceSelect.dataset.tabId = tab.id;
-                // Если режим только чтения — блокируем поле
-                if (!editable) {
-                    resourceSelect.disabled = true;
-                }
-                // Создаём option для каждого доступного ресурса
-                state.resources.forEach((resource) => {
-                    const option = document.createElement('option');
-                    option.value = resource.id;
-                    option.textContent = resource.name;
-                    // Если ресурс совпадает с текущим — отмечаем как выбранный
-                    if (resource.id === element.resourceId) {
-                        option.selected = true;
+
+        const columnsWrapper = document.createElement('div');
+        columnsWrapper.className = 'workshop-columns';
+
+        [0, 1].forEach((column) => {
+            const columnEl = document.createElement('div');
+            columnEl.className = 'workshop-column';
+            columnEl.dataset.column = String(column);
+            columnEl.dataset.tabId = tab.id;
+
+            const columnTitle = document.createElement('div');
+            columnTitle.className = 'workshop-column-title';
+            columnTitle.textContent = column === 0 ? 'Column A' : 'Column B';
+
+            const list = document.createElement('div');
+            list.className = 'workshop-column-list';
+            list.dataset.columnList = String(column);
+
+            const resources = getColumnResources(tab, column);
+            if (resources.length === 0) {
+                const empty = document.createElement('div');
+                empty.className = 'workshop-empty';
+                empty.textContent = 'Drop resources here.';
+                list.appendChild(empty);
+            } else {
+                resources.forEach((resource) => {
+                    const card = document.createElement('div');
+                    card.className = 'workshop-resource-card';
+                    card.dataset.resourceId = resource.id;
+                    card.dataset.tabId = tab.id;
+                    if (editable) {
+                        card.setAttribute('draggable', 'true');
                     }
-                    resourceSelect.appendChild(option);
+
+                    const nameInput = document.createElement('input');
+                    nameInput.type = 'text';
+                    nameInput.value = resource.name;
+                    nameInput.dataset.field = 'resource-name';
+                    nameInput.dataset.resourceId = resource.id;
+                    nameInput.dataset.tabId = tab.id;
+                    if (!editable) {
+                        nameInput.disabled = true;
+                    }
+
+                    const typeSelect = document.createElement('select');
+                    typeSelect.dataset.field = 'resource-type';
+                    typeSelect.dataset.resourceId = resource.id;
+                    typeSelect.dataset.tabId = tab.id;
+                    if (!editable) {
+                        typeSelect.disabled = true;
+                    }
+
+                    ['text', 'number', 'boolean', 'select'].forEach((type) => {
+                        const option = document.createElement('option');
+                        option.value = type;
+                        option.textContent = type;
+                        if (resource.type === type) {
+                            option.selected = true;
+                        }
+                        typeSelect.appendChild(option);
+                    });
+
+                    card.appendChild(nameInput);
+                    card.appendChild(typeSelect);
+
+                    if (editable) {
+                        const removeBtn = document.createElement('button');
+                        removeBtn.type = 'button';
+                        removeBtn.className = 'workshop-inline-btn';
+                        removeBtn.dataset.action = 'remove-resource';
+                        removeBtn.dataset.resourceId = resource.id;
+                        removeBtn.dataset.tabId = tab.id;
+                        removeBtn.textContent = 'Remove';
+                        card.appendChild(removeBtn);
+                    }
+
+                    list.appendChild(card);
                 });
-                // -----------------------------
-                // INPUT: координата X
-                // -----------------------------
-                const posX = document.createElement('input');
-                posX.type = 'number';
-                posX.value = element.x ?? 0;
-                posX.dataset.field = 'element-x';
-                posX.dataset.elementId = element.id;
-                posX.dataset.tabId = tab.id;
-                posX.placeholder = 'X';
-                if (!editable) {
-                    posX.disabled = true;
-                }
-                // -----------------------------
-                // INPUT: координата Y
-                // -----------------------------
-                const posY = document.createElement('input');
-                posY.type = 'number';
-                posY.value = element.y ?? 0;
-                posY.dataset.field = 'element-y';
-                posY.dataset.elementId = element.id;
-                posY.dataset.tabId = tab.id;
-                posY.placeholder = 'Y';
-                if (!editable) {
-                    posY.disabled = true;
-                }
-                // Добавляем select и координаты в строку
-                row.appendChild(resourceSelect);
-                row.appendChild(posX);
-                row.appendChild(posY);
-                // -----------------------------
-                // КНОПКА УДАЛЕНИЯ (только в editable режиме)
-                // -----------------------------
-                if (editable) {
-                    const removeBtn = document.createElement('button');
-                    removeBtn.type = 'button';
-                    removeBtn.className = 'workshop-inline-btn';
-                    // Через data-action потом ловится делегированным обработчиком click
-                    removeBtn.dataset.action = 'remove-element';
-                    removeBtn.dataset.elementId = element.id;
-                    removeBtn.dataset.tabId = tab.id;
-                    removeBtn.textContent = 'Remove';
-                    row.appendChild(removeBtn);
-                }
-                // Добавляем строку элемента в контейнер вкладки
-                elementsWrapper.appendChild(row);
-            });
-        }
-        // В конце добавляем весь контейнер элементов в панель вкладки
-        panel.appendChild(elementsWrapper);
-    }
-
-    function renderResourcesPanel() {
-        // Ищем контейнер панели ресурсов внутри root
-        const panel = root.querySelector('[data-resources-panel]');
-        if (!panel) {
-            return;
-        }
-        // Полностью очищаем панель перед повторной отрисовкой
-        // (мы пересобираем DOM каждый раз из state)
-        panel.innerHTML = '';
-        // Если ресурсов нет — показываем заглушку
-        if (state.resources.length === 0) {
-            const empty = document.createElement('div');
-            empty.className = 'workshop-empty';
-            empty.textContent = 'No resources yet.';
-            panel.appendChild(empty);
-            return; // дальше рендерить нечего
-        }
-        // Проходим по каждому ресурсу из состояния
-        state.resources.forEach((resource) => {
-            // Контейнер строки одного ресурса
-            const row = document.createElement('div');
-            row.className = 'workshop-resource-row';
-            // -----------------------------
-            // INPUT: имя ресурса
-            // -----------------------------
-            const nameInput = document.createElement('input');
-            nameInput.type = 'text';
-            nameInput.value = resource.name;
-            // data-атрибуты используются делегированными обработчиками
-            nameInput.dataset.field = 'resource-name';
-            nameInput.dataset.resourceId = resource.id;
-            if (!editable) {
-                nameInput.disabled = true;
-            }
-            // -----------------------------
-            // SELECT: тип ресурса
-            // -----------------------------
-            const typeSelect = document.createElement('select');
-            typeSelect.dataset.field = 'resource-type';
-            typeSelect.dataset.resourceId = resource.id;
-            if (!editable) {
-                typeSelect.disabled = true;
-            }
-            // Возможные типы ресурса
-            ['text', 'number', 'boolean', 'select'].forEach((type) => {
-                const option = document.createElement('option');
-                option.value = type;
-                option.textContent = type;
-                // Если тип совпадает с текущим — отмечаем выбранным
-                if (resource.type === type) {
-                    option.selected = true;
-                }
-                typeSelect.appendChild(option);
-            });
-            // -----------------------------
-            // INPUT: значение по умолчанию
-            // -----------------------------
-            const valueInput = document.createElement('input');
-            valueInput.type = 'text';
-            // Берём значение из resource.data.value, если оно существует
-            valueInput.value = resource.data?.value ?? '';
-            valueInput.placeholder = 'Value';
-            valueInput.dataset.field = 'resource-value';
-            valueInput.dataset.resourceId = resource.id;
-            if (!editable) {
-                valueInput.disabled = true;
-            }
-            // Добавляем элементы в строку
-            row.appendChild(nameInput);
-            row.appendChild(typeSelect);
-            row.appendChild(valueInput);
-            // -----------------------------
-            // КНОПКА УДАЛЕНИЯ (только если можно редактировать)
-            // -----------------------------
-            if (editable) {
-                const removeBtn = document.createElement('button');
-                removeBtn.type = 'button';
-                removeBtn.className = 'workshop-inline-btn';
-                removeBtn.dataset.action = 'remove-resource';
-                removeBtn.dataset.resourceId = resource.id;
-                removeBtn.textContent = 'Remove';
-                row.appendChild(removeBtn);
             }
 
-            panel.appendChild(row);
+            columnEl.appendChild(columnTitle);
+            columnEl.appendChild(list);
+            columnsWrapper.appendChild(columnEl);
         });
+
+        panel.appendChild(columnsWrapper);
     }
-    // Обновляет отображаемое имя ресурса во всех select'ах элементов, где этот ресурс используется
-    function updateResourceOptionLabels(resourceId, name) {
-        // Ищем ВСЕ option внутри select элементов, которые ссылаются на данный resourceId
-        root.querySelectorAll(`select[data-field="element-resource"] option[value="${resourceId}"]`)
-            .forEach((option) => {
-                option.textContent = name; // Меняем текст option (чтобы сразу обновилось в UI)
-            });
-    }
-    /** Обработчик кликов */ 
+
     root.addEventListener('click', (event) => {
-        // Ищем ближайший элемент с data-action (поддержка кликов по вложенным элементам)
         const actionEl = event.target.closest('[data-action]');
-        if (!actionEl) { // Если клик не по элементу с action — ничего не делае
+        if (!actionEl) {
             return;
         }
-        // Тип действия (add-tab, remove-resource и т.д.)
+
         const action = actionEl.dataset.action;
-        if (!editable && action !== 'select-tab') { // Если режим read-only — разрешаем только переключение вкладок
+        if (!editable && action !== 'select-tab') {
             return;
         }
-        // Переключение вкладки
+
         if (action === 'select-tab') {
             setActiveTab(actionEl.dataset.tabId);
             return;
         }
-        // Добавление вкладки
+
         if (action === 'add-tab') {
-            const tab = {
-                id: createId('tab'),
-                name: `Tab ${state.tabs.length + 1}`,
-                order: state.tabs.length,
-                elements: [],
-            };
+            const tab = createDefaultTab(`Tab ${state.tabs.length + 1}`, state.tabs.length);
             state.tabs.push(tab);
             setActiveTab(tab.id);
             render();
             return;
         }
-        // Удаление вкладки
+
         if (action === 'remove-tab') {
+            if (state.tabs.length <= 1) {
+                alert('At least one tab is required.');
+                return;
+            }
             const tabId = actionEl.dataset.tabId;
             state.tabs = state.tabs.filter((tab) => tab.id !== tabId);
-            if (activeTabId === tabId) { // Если удалили активную — выбираем первую доступную
+            if (activeTabId === tabId) {
                 activeTabId = state.tabs[0]?.id ?? null;
             }
             render();
             return;
         }
-        // Добавление ресурса
+
         if (action === 'add-resource') {
-            const resource = {
-                id: createId('res'),
-                name: `Resource ${state.resources.length + 1}`,
-                type: 'text',
-                data: { value: '' },
-            };
-            state.resources.push(resource);
-            render();
-            return;
-        }
-        // Удаление ресурса
-        if (action === 'remove-resource') {
-            const resourceId = actionEl.dataset.resourceId;
-            state.resources = state.resources.filter((resource) => resource.id !== resourceId); // Удаляем ресурс
-            state.tabs.forEach((tab) => { // Удаляем все элементы, которые ссылались на этот ресурс
-                tab.elements = tab.elements.filter((element) => element.resourceId !== resourceId);
-            });
-            render();
-            return;
-        }
-        // Добавление ресурса
-        if (action === 'add-element') {
-            if (state.tabs.length === 0) { // Если вкладок нет — создаём первую
-                const tab = {
-                    id: createId('tab'),
-                    name: 'Tab 1',
-                    order: 0,
-                    elements: [],
-                };
+            if (state.tabs.length === 0) {
+                const tab = createDefaultTab('Tab 1', 0);
                 state.tabs.push(tab);
                 activeTabId = tab.id;
             }
 
-            if (state.resources.length === 0) { // Если нет ресурсов — создаём первый
-                state.resources.push({
-                    id: createId('res'),
-                    name: 'Resource 1',
-                    type: 'text',
-                    data: { value: '' },
-                });
-            }
-
-            const tab = getActiveTab() ?? state.tabs[0]; // Берём активную вкладку
-
-            tab.elements.push({ // Добавляем элемент с привязкой к первому ресурсу
-                id: createId('el'),
-                resourceId: state.resources[0].id,
-                x: 0,
-                y: 0,
-            });
+            const tab = getActiveTab() ?? state.tabs[0];
+            const column = getColumnResources(tab, 0).length <= getColumnResources(tab, 1).length ? 0 : 1;
+            const order = getColumnResources(tab, column).length;
+            const resource = {
+                id: createId('res'),
+                name: `Resource ${tab.resources.length + 1}`,
+                type: 'text',
+                position: { column, order },
+            };
+            tab.resources.push(resource);
             render();
             return;
         }
-        // Удаление ресурса
-        if (action === 'remove-element') {
+
+        if (action === 'remove-resource') {
             const tabId = actionEl.dataset.tabId;
-            const elementId = actionEl.dataset.elementId;
+            const resourceId = actionEl.dataset.resourceId;
             const tab = state.tabs.find((item) => item.id === tabId);
-            if (tab) { // Удаляем элемент из массива
-                tab.elements = tab.elements.filter((element) => element.id !== elementId);
+            if (tab) {
+                const removed = removeResourceFromTab(tab, resourceId);
+                if (removed) {
+                    reindexColumn(tab, removed.position?.column ?? 0);
+                }
             }
             render();
         }
     });
-    // ---------------------------
-    // ОБРАБОТЧИК ВВОДА
-    // ---------------------------
-    // Универсальный обработчик всех input/change событий внутри builder'а
+
     function handleFieldInput(event) {
-        if (!editable) { // Если режим только чтения — выходим
+        if (!editable) {
             return;
         }
-        const field = event.target.dataset.field; // Определяем тип поля через data-field
-        if (!field) { // Если поле не относится к нашей системе — игнорируем
+        const field = event.target.dataset.field;
+        if (!field) {
             return;
         }
-        // Изменение имени вкладки
+
         if (field === 'tab-name') {
-            const tab = state.tabs.find((item) => item.id === event.target.dataset.tabId); // Ищем вкладку по id
+            const tab = state.tabs.find((item) => item.id === event.target.dataset.tabId);
             if (tab) {
-                // Обновляем состояние
                 tab.name = event.target.value;
                 const tabButton = root.querySelector(`[data-action="select-tab"][data-tab-id="${tab.id}"]`);
                 if (tabButton) {
                     tabButton.textContent = tab.name || 'Tab';
                 }
             }
-            // Синхронизируем hidden-поля формы
             syncFields();
             return;
         }
-        // ИЗМЕНЕНИЕ ИМЕНИ РЕСУРСА
+
         if (field === 'resource-name') {
-            const resource = state.resources.find((item) => item.id === event.target.dataset.resourceId);
+            const tab = state.tabs.find((item) => item.id === event.target.dataset.tabId);
+            const resource = tab?.resources.find((item) => item.id === event.target.dataset.resourceId);
             if (resource) {
                 resource.name = event.target.value;
-                // Обновляем label во всех select'ах элементов
-                updateResourceOptionLabels(resource.id, resource.name || 'Resource');
             }
             syncFields();
             return;
         }
-        // ИЗМЕНЕНИЕ ТИПА РЕСУРСА
+
         if (field === 'resource-type') {
-            const resource = state.resources.find((item) => item.id === event.target.dataset.resourceId);
+            const tab = state.tabs.find((item) => item.id === event.target.dataset.tabId);
+            const resource = tab?.resources.find((item) => item.id === event.target.dataset.resourceId);
             if (resource) {
                 resource.type = event.target.value;
             }
             syncFields();
-            return;
-        }
-        // ИЗМЕНЕНИЕ ЗНАЧЕНИЯ РЕСУРСА
-        if (field === 'resource-value') {
-            const resource = state.resources.find((item) => item.id === event.target.dataset.resourceId);
-            if (resource) {
-                if (!isPlainObject(resource.data) && !Array.isArray(resource.data)) {
-                    resource.data = {};
-                }
-                resource.data.value = event.target.value;
-            }
-            syncFields();
-            return;
-        }
-        // СМЕНА РЕСУРСА У ЭЛЕМЕНТА
-        if (field === 'element-resource') {
-            const tab = state.tabs.find((item) => item.id === event.target.dataset.tabId);
-            const element = tab?.elements.find((item) => item.id === event.target.dataset.elementId);
-            if (element) {
-                element.resourceId = event.target.value;
-            }
-            syncFields();
-            return;
-        }
-        // ИЗМЕНЕНИЕ КООРДИНАТ ЭЛЕМЕНТА
-        if (field === 'element-x' || field === 'element-y') {
-            const tab = state.tabs.find((item) => item.id === event.target.dataset.tabId);
-            const element = tab?.elements.find((item) => item.id === event.target.dataset.elementId);
-            if (element) {
-                const value = isNumeric(event.target.value) ? Number(event.target.value) : 0;
-                if (field === 'element-x') {
-                    element.x = value;
-                } else {
-                    element.y = value;
-                }
-            }
-            syncFields();
         }
     }
-    // Слушаем ввод текста (input)
+
     root.addEventListener('input', handleFieldInput);
-    // Слушаем change (select, checkbox и т.д.)
     root.addEventListener('change', handleFieldInput);
-    // Первый рендер при инициализации builder'а
+
+    root.addEventListener('dragstart', (event) => {
+        if (!editable) {
+            return;
+        }
+        const card = event.target.closest('.workshop-resource-card');
+        if (!card) {
+            return;
+        }
+        dragState = {
+            resourceId: card.dataset.resourceId,
+            tabId: card.dataset.tabId,
+        };
+        card.classList.add('is-dragging');
+        if (event.dataTransfer) {
+            event.dataTransfer.effectAllowed = 'move';
+        }
+    });
+
+    root.addEventListener('dragend', (event) => {
+        const card = event.target.closest('.workshop-resource-card');
+        if (card) {
+            card.classList.remove('is-dragging');
+        }
+        dragState = null;
+    });
+
+    root.addEventListener('dragover', (event) => {
+        if (!editable || !dragState) {
+            return;
+        }
+        const column = event.target.closest('[data-column]');
+        const card = event.target.closest('.workshop-resource-card');
+        if (!column && !card) {
+            return;
+        }
+        event.preventDefault();
+        if (event.dataTransfer) {
+            event.dataTransfer.dropEffect = 'move';
+        }
+    });
+
+    root.addEventListener('drop', (event) => {
+        if (!editable || !dragState) {
+            return;
+        }
+        const card = event.target.closest('.workshop-resource-card');
+        const columnEl = event.target.closest('[data-column]');
+        if (!columnEl && !card) {
+            return;
+        }
+        event.preventDefault();
+
+        const targetColumn = Number((columnEl ?? card.closest('[data-column]'))?.dataset.column ?? 0);
+        const targetTabId = (columnEl ?? card).closest('[data-column]')?.dataset.tabId;
+        if (!targetTabId) {
+            return;
+        }
+
+        moveResource({
+            fromTabId: dragState.tabId,
+            resourceId: dragState.resourceId,
+            toTabId: targetTabId,
+            toColumn: targetColumn,
+            beforeResourceId: card?.dataset.resourceId ?? null,
+        });
+
+        render();
+    });
+
+    function flattenResources(tabs) {
+        const list = [];
+        tabs.forEach((tab) => {
+            const resources = Array.isArray(tab.resources) ? tab.resources : [];
+            resources.forEach((resource) => {
+                list.push({
+                    id: resource.id,
+                    name: resource.name,
+                    type: resource.type,
+                    tabId: tab.id,
+                    column: resource.position?.column ?? 0,
+                    order: resource.position?.order ?? 0,
+                });
+            });
+        });
+        return list;
+    }
+
+    function getColumnResources(tab, column) {
+        return (tab.resources ?? [])
+            .filter((resource) => (resource.position?.column ?? 0) === column)
+            .sort((a, b) => (a.position?.order ?? 0) - (b.position?.order ?? 0));
+    }
+
+    function removeResourceFromTab(tab, resourceId) {
+        const index = tab.resources.findIndex((resource) => resource.id === resourceId);
+        if (index === -1) {
+            return null;
+        }
+        return tab.resources.splice(index, 1)[0];
+    }
+
+    function replaceColumnResources(tab, column, columnResources) {
+        const others = (tab.resources ?? []).filter((resource) => (resource.position?.column ?? 0) !== column);
+        tab.resources = others.concat(columnResources);
+    }
+
+    function reindexColumn(tab, column) {
+        const columnResources = getColumnResources(tab, column);
+        columnResources.forEach((resource, index) => {
+            resource.position = resource.position ?? {};
+            resource.position.column = column;
+            resource.position.order = index;
+        });
+        replaceColumnResources(tab, column, columnResources);
+    }
+
+    function moveResource({ fromTabId, resourceId, toTabId, toColumn, beforeResourceId }) {
+        const fromTab = state.tabs.find((tab) => tab.id === fromTabId);
+        const toTab = state.tabs.find((tab) => tab.id === toTabId);
+        if (!fromTab || !toTab) {
+            return;
+        }
+
+        const resource = removeResourceFromTab(fromTab, resourceId);
+        if (!resource) {
+            return;
+        }
+
+        const fromColumn = resource.position?.column ?? 0;
+        const sameColumn = fromTabId === toTabId && fromColumn === toColumn;
+
+        const targetColumnResources = getColumnResources(toTab, toColumn);
+        let insertIndex = beforeResourceId
+            ? targetColumnResources.findIndex((item) => item.id === beforeResourceId)
+            : targetColumnResources.length;
+        if (insertIndex < 0) {
+            insertIndex = targetColumnResources.length;
+        }
+
+        resource.position = resource.position ?? {};
+        resource.position.column = toColumn;
+        targetColumnResources.splice(insertIndex, 0, resource);
+        targetColumnResources.forEach((item, index) => {
+            item.position.column = toColumn;
+            item.position.order = index;
+        });
+        replaceColumnResources(toTab, toColumn, targetColumnResources);
+
+        if (!sameColumn) {
+            reindexColumn(fromTab, fromColumn);
+        }
+    }
+
     render();
 }

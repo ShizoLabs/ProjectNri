@@ -5,9 +5,8 @@
         <div class="workshop-panel-title">Constructor</div>
         <button class="tool-btn" type="button" data-action="add-tab" {% if not isEditable %}disabled{% endif %}>Add tab</button>
         <button class="tool-btn" type="button" data-action="add-resource" {% if not isEditable %}disabled{% endif %}>Add resource</button>
-        <button class="tool-btn" type="button" data-action="add-element" {% if not isEditable %}disabled{% endif %}>Add resource to tab</button>
         <div class="workshop-panel-hint">
-            Use tabs to group resources and place them with X/Y positions.
+            Drag resources between two columns to set their position.
         </div>
     </aside>
 
@@ -15,11 +14,6 @@
         <div class="workshop-tabs-bar" data-tabs-bar></div>
         <div class="workshop-tab-panel" data-tab-panel></div>
     </main>
-
-    <aside class="workshop-panel workshop-resources">
-        <div class="workshop-panel-title">Resources</div>
-        <div class="workshop-resource-list" data-resources-panel></div>
-    </aside>
 </div>
 
 {% if form is defined %}
