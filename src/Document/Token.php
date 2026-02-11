@@ -42,6 +42,9 @@ class Token
     #[ODM\Field(type: 'string')]
     private ?string $templateId = null;
 
+    #[ODM\Field(type: 'hash')]
+    private array $values = [];
+
     #[ODM\ReferenceOne(targetDocument: TokenType::class, inversedBy: 'tokens')]
     private ?TokenType $tokenType = null;
 
@@ -163,6 +166,17 @@ class Token
     public function setTemplateId(?string $templateId): self
     {
         $this->templateId = $templateId;
+        return $this;
+    }
+
+    public function getValues(): array
+    {
+        return $this->values;
+    }
+
+    public function setValues(array $values): self
+    {
+        $this->values = $values;
         return $this;
     }
 
