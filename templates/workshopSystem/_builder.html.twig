@@ -13,6 +13,13 @@
     <main class="workshop-panel workshop-constructor">
         <div class="workshop-tabs-bar" data-tabs-bar></div>
         <div class="workshop-tab-panel" data-tab-panel></div>
+        <div class="workshop-formulas" data-formulas-section>
+            <div class="workshop-panel-title">Formulas</div>
+            <div class="workshop-formula-list" data-formulas-list></div>
+            {% if isEditable %}
+                <button class="tool-btn" type="button" data-action="add-formula">Add formula</button>
+            {% endif %}
+        </div>
     </main>
 </div>
 

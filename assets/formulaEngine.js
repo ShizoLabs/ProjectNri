@@ -52,7 +52,8 @@ function normalizeKey(value) {
 
 // Replace dice notation like "1d8" or "d6" with "dice(1,8)" / "dice(1,6)".
 function normalizeExpression(expression) {
-    return String(expression).replace(/\b(\d+)?\s*d\s*(\d+)\b/gi, (_, count, sides) => {
+    const withTokens = String(expression).replace(/\|([^|]+)\|/g, (_, name) => normalizeVariableName(name));
+    return withTokens.replace(/\b(\d+)?\s*d\s*(\d+)\b/gi, (_, count, sides) => {
         const safeCount = count ? Number(count) : 1;
         return `dice(${safeCount},${Number(sides)})`;
     });
@@ -205,6 +206,15 @@ export function recomputeAffected(tokenValues, formulas, changedKeys) {
 
 function isPlainObject(value) {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeVariableName(value) {
+    return String(value)
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_]/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_+|_+$/g, '') || 'var';
 }
 
 // Export helpers for tests or inspection if needed.

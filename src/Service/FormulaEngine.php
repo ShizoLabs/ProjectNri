@@ -181,11 +181,24 @@ final class FormulaEngine
     // Replace dice notation like "1d8" or "d6" with "dice(1,8)" / "dice(1,6)".
     private function normalizeExpression(string $expression): string
     {
+        $expression = preg_replace_callback('/\|([^|]+)\|/', function ($matches) {
+            return $this->normalizeVariableName($matches[1] ?? '');
+        }, $expression) ?? $expression;
+
         return preg_replace_callback('/\b(\d+)?\s*d\s*(\d+)\b/i', function ($matches) {
             $count = $matches[1] !== '' ? (int) $matches[1] : 1;
             $sides = (int) $matches[2];
             return sprintf('dice(%d,%d)', $count, $sides);
         }, $expression) ?? $expression;
+    }
+
+    private function normalizeVariableName(string $value): string
+    {
+        $normalized = strtolower(trim($value));
+        $normalized = preg_replace('/[^a-z0-9_]/', '_', $normalized) ?? '';
+        $normalized = preg_replace('/_+/', '_', $normalized) ?? '';
+        $normalized = trim($normalized, '_');
+        return $normalized !== '' ? $normalized : 'var';
     }
 
     // Extract variable names from expression to build dependencies.

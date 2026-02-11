@@ -13,7 +13,7 @@ if (root) {
     const state = {
         settings: payload.settings ?? {},
         tabs,
-        formulas: Array.isArray(payload.formulas) ? payload.formulas : [],
+        formulas: normalizeFormulas(payload.formulas),
         meta: payload.meta ?? {},
     };
 
@@ -79,6 +79,21 @@ if (root) {
         const order = isNumeric(position.order) ? Number(position.order) : resourceIndex;
         safe.position = { column, order };
         return safe;
+    }
+
+    function normalizeFormulas(list) {
+        if (!Array.isArray(list)) {
+            return [];
+        }
+        return list.map((formula, index) => {
+            const safe = isPlainObject(formula) ? { ...formula } : {};
+            if (!isNonEmptyString(safe.id)) {
+                safe.id = createId('formula');
+            }
+            safe.name = isNonEmptyString(safe.name) ? safe.name : `Formula ${index + 1}`;
+            safe.expression = typeof safe.expression === 'string' ? safe.expression : '';
+            return safe;
+        });
     }
 
     function isPlainObject(value) {
@@ -157,6 +172,7 @@ if (root) {
     function render() {
         renderTabsBar();
         renderTabPanel();
+        renderFormulasPanel();
         syncFields();
     }
 
@@ -320,6 +336,85 @@ if (root) {
         panel.appendChild(columnsWrapper);
     }
 
+    function renderFormulasPanel() {
+        const panel = root.querySelector('[data-formulas-list]');
+        if (!panel) {
+            return;
+        }
+
+        panel.innerHTML = '';
+        if (state.formulas.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'workshop-empty';
+            empty.textContent = 'No formulas yet.';
+            panel.appendChild(empty);
+            return;
+        }
+
+        const resources = getAllResources();
+
+        state.formulas.forEach((formula) => {
+            const row = document.createElement('div');
+            row.className = 'workshop-formula-row';
+
+            const nameInput = document.createElement('input');
+            nameInput.type = 'text';
+            nameInput.value = formula.name;
+            nameInput.placeholder = 'Formula name';
+            nameInput.dataset.field = 'formula-name';
+            nameInput.dataset.formulaId = formula.id;
+            if (!editable) {
+                nameInput.disabled = true;
+            }
+
+            const expressionInput = document.createElement('input');
+            expressionInput.type = 'text';
+            expressionInput.value = formula.expression;
+            expressionInput.placeholder = 'Expression';
+            expressionInput.dataset.field = 'formula-expression';
+            expressionInput.dataset.formulaId = formula.id;
+            if (!editable) {
+                expressionInput.disabled = true;
+            }
+
+            const resourceSelect = document.createElement('select');
+            resourceSelect.dataset.action = 'insert-resource';
+            resourceSelect.dataset.formulaId = formula.id;
+            if (!editable) {
+                resourceSelect.disabled = true;
+            }
+
+            const placeholder = document.createElement('option');
+            placeholder.value = '';
+            placeholder.textContent = resources.length > 0 ? 'Insert resource' : 'No resources';
+            placeholder.selected = true;
+            resourceSelect.appendChild(placeholder);
+
+            resources.forEach((resource) => {
+                const option = document.createElement('option');
+                option.value = resource.key;
+                option.textContent = resource.name;
+                resourceSelect.appendChild(option);
+            });
+
+            row.appendChild(nameInput);
+            row.appendChild(expressionInput);
+            row.appendChild(resourceSelect);
+
+            if (editable) {
+                const removeBtn = document.createElement('button');
+                removeBtn.type = 'button';
+                removeBtn.className = 'workshop-inline-btn';
+                removeBtn.dataset.action = 'remove-formula';
+                removeBtn.dataset.formulaId = formula.id;
+                removeBtn.textContent = 'Remove';
+                row.appendChild(removeBtn);
+            }
+
+            panel.appendChild(row);
+        });
+    }
+
     root.addEventListener('click', (event) => {
         const actionEl = event.target.closest('[data-action]');
         if (!actionEl) {
@@ -390,6 +485,24 @@ if (root) {
                 }
             }
             render();
+            return;
+        }
+
+        if (action === 'add-formula') {
+            state.formulas.push({
+                id: createId('formula'),
+                name: `Formula ${state.formulas.length + 1}`,
+                expression: '',
+            });
+            render();
+            return;
+        }
+
+        if (action === 'remove-formula') {
+            const formulaId = actionEl.dataset.formulaId;
+            state.formulas = state.formulas.filter((formula) => formula.id !== formulaId);
+            render();
+            return;
         }
     });
 
@@ -430,6 +543,24 @@ if (root) {
             const resource = tab?.resources.find((item) => item.id === event.target.dataset.resourceId);
             if (resource) {
                 resource.type = event.target.value;
+            }
+            syncFields();
+            return;
+        }
+
+        if (field === 'formula-name') {
+            const formula = state.formulas.find((item) => item.id === event.target.dataset.formulaId);
+            if (formula) {
+                formula.name = event.target.value;
+            }
+            syncFields();
+            return;
+        }
+
+        if (field === 'formula-expression') {
+            const formula = state.formulas.find((item) => item.id === event.target.dataset.formulaId);
+            if (formula) {
+                formula.expression = event.target.value;
             }
             syncFields();
         }
@@ -591,5 +722,60 @@ if (root) {
         }
     }
 
+    root.addEventListener('change', (event) => {
+        const select = event.target.closest('[data-action=\"insert-resource\"]');
+        if (!select || !editable) {
+            return;
+        }
+
+        const formulaId = select.dataset.formulaId;
+        const key = select.value;
+        if (!key) {
+            return;
+        }
+
+        const formula = state.formulas.find((item) => item.id === formulaId);
+        const input = root.querySelector(`input[data-field=\"formula-expression\"][data-formula-id=\"${formulaId}\"]`);
+        if (formula && input) {
+            const token = `|${key}|`;
+            insertAtCursor(input, token);
+            formula.expression = input.value;
+            syncFields();
+        }
+
+        select.value = '';
+    });
+
     render();
+
+    function getAllResources() {
+        const list = [];
+        state.tabs.forEach((tab) => {
+            (tab.resources ?? []).forEach((resource) => {
+                const key = normalizeVariableName(resource.name);
+                list.push({ name: resource.name, key });
+            });
+        });
+        return list;
+    }
+
+    function normalizeVariableName(value) {
+        return String(value)
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9_]/g, '_')
+            .replace(/_+/g, '_')
+            .replace(/^_+|_+$/g, '') || 'var';
+    }
+
+    function insertAtCursor(input, text) {
+        const start = input.selectionStart ?? input.value.length;
+        const end = input.selectionEnd ?? input.value.length;
+        const before = input.value.slice(0, start);
+        const after = input.value.slice(end);
+        input.value = `${before}${text}${after}`;
+        const cursor = start + text.length;
+        input.setSelectionRange(cursor, cursor);
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
 }
