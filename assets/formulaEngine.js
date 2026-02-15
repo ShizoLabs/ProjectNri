@@ -2,8 +2,8 @@ import { Parser } from 'https://cdn.jsdelivr.net/npm/expr-eval@2.0.2/dist/index.
 
 // Formula engine using expr-eval with dice notation support.
 // Exports:
-// - computeAll(tokenValues, formulas)
-// - recomputeAffected(tokenValues, formulas, changedKeys)
+// - computeAll(tokenValues, formulas) - Полный пересчёт
+// - recomputeAffected(tokenValues, formulas, changedKeys) - Оптимизированный пересчёт только изменнённых значений.
 
 const parser = new Parser({
     operators: {
