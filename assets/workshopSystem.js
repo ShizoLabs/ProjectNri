@@ -1,8 +1,21 @@
+import { Parser } from 'https://cdn.jsdelivr.net/npm/expr-eval@2.0.2/dist/index.mjs';
+
 const root = document.querySelector('[data-workshop-builder]');
 
 if (root) {
     const editable = root.dataset.editable === 'true';
     const payload = window.WORKSHOP_SYSTEM ?? {};
+
+    const parser = createExpressionParser();
+    const functionSuggestions = [
+        { label: 'floor(x)', detail: 'function', insertText: 'floor()', cursorOffset: -1 },
+        { label: 'min(a, b)', detail: 'function', insertText: 'min(, )', cursorOffset: -3 },
+        { label: 'max(a, b)', detail: 'function', insertText: 'max(, )', cursorOffset: -3 },
+        { label: 'dice(count, sides)', detail: 'function', insertText: 'dice(1,20)', cursorOffset: 0 },
+        { label: 'abs(x)', detail: 'function', insertText: 'abs()', cursorOffset: -1 },
+        { label: 'ceil(x)', detail: 'function', insertText: 'ceil()', cursorOffset: -1 },
+        { label: 'round(x)', detail: 'function', insertText: 'round()', cursorOffset: -1 },
+    ];
 
     const legacyResourceMap = buildLegacyResourceMap(payload.resources);
     const tabs = normalizeTabs(payload.tabs, legacyResourceMap);
@@ -17,13 +30,42 @@ if (root) {
         meta: payload.meta ?? {},
     };
 
+    const formulaValidationById = new Map();
+
     let activeTabId = state.tabs[0]?.id ?? null;
     let dragState = null;
+
+    const autocomplete = {
+        element: null,
+        input: null,
+        formulaId: null,
+        context: null,
+        items: [],
+        activeIndex: 0,
+    };
 
     const fields = {};
     document.querySelectorAll('[data-workshop-field]').forEach((field) => {
         fields[field.dataset.workshopField] = field;
     });
+
+    if (editable) {
+        initAutocomplete();
+    }
+
+    function createExpressionParser() {
+        const exprParser = new Parser({
+            operators: {
+                assignment: false,
+            },
+        });
+        exprParser.functions.dice = (count, sides) => {
+            const safeCount = Math.max(0, Math.floor(Number(count)) || 0);
+            const safeSides = Math.max(1, Math.floor(Number(sides)) || 1);
+            return safeCount > 0 && safeSides > 0 ? 1 : 0;
+        };
+        return exprParser;
+    }
 
     function normalizeTabs(list, legacyMap) {
         if (!Array.isArray(list)) {
@@ -40,6 +82,7 @@ if (root) {
             }
             safe.order = Number.isInteger(safe.order) ? safe.order : index;
             safe.resources = Array.isArray(safe.resources) ? safe.resources : [];
+
             if (safe.resources.length === 0 && Array.isArray(safe.elements)) {
                 safe.resources = safe.elements.map((element, elementIndex) => {
                     const legacy = legacyMap[element.resourceId] ?? {};
@@ -56,9 +99,11 @@ if (root) {
             } else {
                 safe.resources = safe.resources.map((resource, resourceIndex) => normalizeResource(resource, resourceIndex));
             }
+
             if (safe.elements) {
                 delete safe.elements;
             }
+
             return safe;
         });
     }
@@ -74,6 +119,7 @@ if (root) {
         if (!isNonEmptyString(safe.type)) {
             safe.type = 'text';
         }
+
         const position = isPlainObject(safe.position) ? safe.position : {};
         const column = position.column === 1 ? 1 : 0;
         const order = isNumeric(position.order) ? Number(position.order) : resourceIndex;
@@ -85,6 +131,7 @@ if (root) {
         if (!Array.isArray(list)) {
             return [];
         }
+
         return list.map((formula, index) => {
             const safe = isPlainObject(formula) ? { ...formula } : {};
             if (!isNonEmptyString(safe.id)) {
@@ -115,11 +162,29 @@ if (root) {
         return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
     }
 
+    function normalizeVariableName(value) {
+        return String(value)
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9_]/g, '_')
+            .replace(/_+/g, '_')
+            .replace(/^_+|_+$/g, '') || 'var';
+    }
+
+    function normalizeExpressionForParser(expression) {
+        const withTokens = String(expression).replace(/\|([^|]+)\|/g, (_, name) => normalizeVariableName(name));
+        return withTokens.replace(/\b(\d+)?\s*d\s*(\d+)\b/gi, (_, count, sides) => {
+            const safeCount = count ? Number(count) : 1;
+            return `dice(${safeCount},${Number(sides)})`;
+        });
+    }
+
     function buildLegacyResourceMap(list) {
         const map = {};
         if (!Array.isArray(list)) {
             return map;
         }
+
         list.forEach((resource) => {
             if (!isPlainObject(resource) || !isNonEmptyString(resource.id)) {
                 return;
@@ -129,6 +194,7 @@ if (root) {
                 type: isNonEmptyString(resource.type) ? resource.type : 'text',
             };
         });
+
         return map;
     }
 
@@ -170,9 +236,11 @@ if (root) {
     }
 
     function render() {
+        validateFormulas();
         renderTabsBar();
         renderTabPanel();
         renderFormulasPanel();
+        updateValidationUI();
         syncFields();
     }
 
@@ -351,8 +419,6 @@ if (root) {
             return;
         }
 
-        const resources = getAllResources();
-
         state.formulas.forEach((formula) => {
             const row = document.createElement('div');
             row.className = 'workshop-formula-row';
@@ -367,41 +433,38 @@ if (root) {
                 nameInput.disabled = true;
             }
 
+            const expressionWrap = document.createElement('div');
+            expressionWrap.className = 'workshop-formula-expression';
+
             const expressionInput = document.createElement('input');
             expressionInput.type = 'text';
             expressionInput.value = formula.expression;
-            expressionInput.placeholder = 'Expression';
+            expressionInput.placeholder = 'Expression, ex: (|agility|-10) / 2';
             expressionInput.dataset.field = 'formula-expression';
             expressionInput.dataset.formulaId = formula.id;
             if (!editable) {
                 expressionInput.disabled = true;
             }
 
-            const resourceSelect = document.createElement('select');
-            resourceSelect.dataset.action = 'insert-resource';
-            resourceSelect.dataset.formulaId = formula.id;
-            if (!editable) {
-                resourceSelect.disabled = true;
-            }
+            const status = document.createElement('div');
+            status.className = 'workshop-formula-status';
+            status.dataset.formulaStatus = formula.id;
 
-            const placeholder = document.createElement('option');
-            placeholder.value = '';
-            placeholder.textContent = resources.length > 0 ? 'Insert resource' : 'No resources';
-            placeholder.selected = true;
-            resourceSelect.appendChild(placeholder);
-
-            resources.forEach((resource) => {
-                const option = document.createElement('option');
-                option.value = resource.key;
-                option.textContent = resource.name;
-                resourceSelect.appendChild(option);
-            });
+            expressionWrap.appendChild(expressionInput);
+            expressionWrap.appendChild(status);
 
             row.appendChild(nameInput);
-            row.appendChild(expressionInput);
-            row.appendChild(resourceSelect);
+            row.appendChild(expressionWrap);
 
             if (editable) {
+                const suggestBtn = document.createElement('button');
+                suggestBtn.type = 'button';
+                suggestBtn.className = 'workshop-inline-btn';
+                suggestBtn.dataset.action = 'open-autocomplete';
+                suggestBtn.dataset.formulaId = formula.id;
+                suggestBtn.textContent = 'Insert';
+                row.appendChild(suggestBtn);
+
                 const removeBtn = document.createElement('button');
                 removeBtn.type = 'button';
                 removeBtn.className = 'workshop-inline-btn';
@@ -415,228 +478,135 @@ if (root) {
         });
     }
 
-    root.addEventListener('click', (event) => {
-        const actionEl = event.target.closest('[data-action]');
-        if (!actionEl) {
-            return;
-        }
+    function validateFormulas() {
+        formulaValidationById.clear();
 
-        const action = actionEl.dataset.action;
-        if (!editable && action !== 'select-tab') {
-            return;
-        }
+        const resources = getAllResources();
+        const resourceKeys = new Set(resources.map((resource) => resource.key));
 
-        if (action === 'select-tab') {
-            setActiveTab(actionEl.dataset.tabId);
-            return;
-        }
+        const entries = state.formulas.map((formula, index) => ({
+            id: formula.id,
+            key: normalizeVariableName(formula.name || `formula_${index + 1}`),
+            expression: formula.expression ?? '',
+        }));
 
-        if (action === 'add-tab') {
-            const tab = createDefaultTab(`Tab ${state.tabs.length + 1}`, state.tabs.length);
-            state.tabs.push(tab);
-            setActiveTab(tab.id);
-            render();
-            return;
-        }
-
-        if (action === 'remove-tab') {
-            if (state.tabs.length <= 1) {
-                alert('At least one tab is required.');
-                return;
-            }
-            const tabId = actionEl.dataset.tabId;
-            state.tabs = state.tabs.filter((tab) => tab.id !== tabId);
-            if (activeTabId === tabId) {
-                activeTabId = state.tabs[0]?.id ?? null;
-            }
-            render();
-            return;
-        }
-
-        if (action === 'add-resource') {
-            if (state.tabs.length === 0) {
-                const tab = createDefaultTab('Tab 1', 0);
-                state.tabs.push(tab);
-                activeTabId = tab.id;
-            }
-
-            const tab = getActiveTab() ?? state.tabs[0];
-            const column = getColumnResources(tab, 0).length <= getColumnResources(tab, 1).length ? 0 : 1;
-            const order = getColumnResources(tab, column).length;
-            const resource = {
-                id: createId('res'),
-                name: `Resource ${tab.resources.length + 1}`,
-                type: 'text',
-                position: { column, order },
-            };
-            tab.resources.push(resource);
-            render();
-            return;
-        }
-
-        if (action === 'remove-resource') {
-            const tabId = actionEl.dataset.tabId;
-            const resourceId = actionEl.dataset.resourceId;
-            const tab = state.tabs.find((item) => item.id === tabId);
-            if (tab) {
-                const removed = removeResourceFromTab(tab, resourceId);
-                if (removed) {
-                    reindexColumn(tab, removed.position?.column ?? 0);
-                }
-            }
-            render();
-            return;
-        }
-
-        if (action === 'add-formula') {
-            state.formulas.push({
-                id: createId('formula'),
-                name: `Formula ${state.formulas.length + 1}`,
-                expression: '',
-            });
-            render();
-            return;
-        }
-
-        if (action === 'remove-formula') {
-            const formulaId = actionEl.dataset.formulaId;
-            state.formulas = state.formulas.filter((formula) => formula.id !== formulaId);
-            render();
-            return;
-        }
-    });
-
-    function handleFieldInput(event) {
-        if (!editable) {
-            return;
-        }
-        const field = event.target.dataset.field;
-        if (!field) {
-            return;
-        }
-
-        if (field === 'tab-name') {
-            const tab = state.tabs.find((item) => item.id === event.target.dataset.tabId);
-            if (tab) {
-                tab.name = event.target.value;
-                const tabButton = root.querySelector(`[data-action="select-tab"][data-tab-id="${tab.id}"]`);
-                if (tabButton) {
-                    tabButton.textContent = tab.name || 'Tab';
-                }
-            }
-            syncFields();
-            return;
-        }
-
-        if (field === 'resource-name') {
-            const tab = state.tabs.find((item) => item.id === event.target.dataset.tabId);
-            const resource = tab?.resources.find((item) => item.id === event.target.dataset.resourceId);
-            if (resource) {
-                resource.name = event.target.value;
-            }
-            syncFields();
-            return;
-        }
-
-        if (field === 'resource-type') {
-            const tab = state.tabs.find((item) => item.id === event.target.dataset.tabId);
-            const resource = tab?.resources.find((item) => item.id === event.target.dataset.resourceId);
-            if (resource) {
-                resource.type = event.target.value;
-            }
-            syncFields();
-            return;
-        }
-
-        if (field === 'formula-name') {
-            const formula = state.formulas.find((item) => item.id === event.target.dataset.formulaId);
-            if (formula) {
-                formula.name = event.target.value;
-            }
-            syncFields();
-            return;
-        }
-
-        if (field === 'formula-expression') {
-            const formula = state.formulas.find((item) => item.id === event.target.dataset.formulaId);
-            if (formula) {
-                formula.expression = event.target.value;
-            }
-            syncFields();
-        }
-    }
-
-    root.addEventListener('input', handleFieldInput);
-    root.addEventListener('change', handleFieldInput);
-
-    root.addEventListener('dragstart', (event) => {
-        if (!editable) {
-            return;
-        }
-        const card = event.target.closest('.workshop-resource-card');
-        if (!card) {
-            return;
-        }
-        dragState = {
-            resourceId: card.dataset.resourceId,
-            tabId: card.dataset.tabId,
-        };
-        card.classList.add('is-dragging');
-        if (event.dataTransfer) {
-            event.dataTransfer.effectAllowed = 'move';
-        }
-    });
-
-    root.addEventListener('dragend', (event) => {
-        const card = event.target.closest('.workshop-resource-card');
-        if (card) {
-            card.classList.remove('is-dragging');
-        }
-        dragState = null;
-    });
-
-    root.addEventListener('dragover', (event) => {
-        if (!editable || !dragState) {
-            return;
-        }
-        const column = event.target.closest('[data-column]');
-        const card = event.target.closest('.workshop-resource-card');
-        if (!column && !card) {
-            return;
-        }
-        event.preventDefault();
-        if (event.dataTransfer) {
-            event.dataTransfer.dropEffect = 'move';
-        }
-    });
-
-    root.addEventListener('drop', (event) => {
-        if (!editable || !dragState) {
-            return;
-        }
-        const card = event.target.closest('.workshop-resource-card');
-        const columnEl = event.target.closest('[data-column]');
-        if (!columnEl && !card) {
-            return;
-        }
-        event.preventDefault();
-
-        const targetColumn = Number((columnEl ?? card.closest('[data-column]'))?.dataset.column ?? 0);
-        const targetTabId = (columnEl ?? card).closest('[data-column]')?.dataset.tabId;
-        if (!targetTabId) {
-            return;
-        }
-
-        moveResource({
-            fromTabId: dragState.tabId,
-            resourceId: dragState.resourceId,
-            toTabId: targetTabId,
-            toColumn: targetColumn,
-            beforeResourceId: card?.dataset.resourceId ?? null,
+        const allFormulaKeys = new Set(entries.map((entry) => entry.key));
+        const counts = new Map();
+        entries.forEach((entry) => {
+            counts.set(entry.key, (counts.get(entry.key) ?? 0) + 1);
         });
 
-        render();
-    });
+        const depsByKey = new Map();
+        const keyToIds = new Map();
+
+        entries.forEach((entry) => {
+            const errors = [];
+            keyToIds.set(entry.key, [...(keyToIds.get(entry.key) ?? []), entry.id]);
+
+            if ((counts.get(entry.key) ?? 0) > 1) {
+                errors.push(`Duplicate formula key: ${entry.key}`);
+            }
+
+            const expression = entry.expression.trim();
+            if (expression === '') {
+                errors.push('Expression is required.');
+                depsByKey.set(entry.key, []);
+                formulaValidationById.set(entry.id, { status: 'invalid', message: errors[0] });
+                return;
+            }
+
+            try {
+                const normalized = normalizeExpressionForParser(expression);
+                const parsed = parser.parse(normalized);
+                const variables = parsed.variables().map((item) => normalizeVariableName(item));
+                const unknown = Array.from(new Set(variables.filter((name) => {
+                    return !resourceKeys.has(name) && !allFormulaKeys.has(name);
+                })));
+
+                if (unknown.length > 0) {
+                    errors.push(`Unknown references: ${unknown.join(', ')}`);
+                }
+
+                const formulaDeps = Array.from(new Set(variables.filter((name) => {
+                    return allFormulaKeys.has(name) && name !== entry.key;
+                })));
+                depsByKey.set(entry.key, formulaDeps);
+            } catch (error) {
+                depsByKey.set(entry.key, []);
+                errors.push(`Parse error: ${error.message}`);
+            }
+
+            formulaValidationById.set(entry.id, {
+                status: errors.length === 0 ? 'valid' : 'invalid',
+                message: errors.length === 0 ? 'Valid expression.' : errors[0],
+            });
+        });
+
+        const cycleKeys = detectCycleKeys(depsByKey);
+        cycleKeys.forEach((cycleKey) => {
+            (keyToIds.get(cycleKey) ?? []).forEach((formulaId) => {
+                formulaValidationById.set(formulaId, {
+                    status: 'invalid',
+                    message: 'Circular dependency detected.',
+                });
+            });
+        });
+    }
+
+    function detectCycleKeys(depsByKey) {
+        const inDegree = new Map();
+        const dependentsByKey = new Map();
+
+        depsByKey.forEach((deps, key) => {
+            inDegree.set(key, deps.length);
+            deps.forEach((dep) => {
+                if (!dependentsByKey.has(dep)) {
+                    dependentsByKey.set(dep, []);
+                }
+                dependentsByKey.get(dep).push(key);
+            });
+        });
+
+        const queue = [];
+        inDegree.forEach((count, key) => {
+            if (count === 0) {
+                queue.push(key);
+            }
+        });
+
+        while (queue.length > 0) {
+            const key = queue.shift();
+            const dependents = dependentsByKey.get(key) ?? [];
+            dependents.forEach((dependent) => {
+                const next = (inDegree.get(dependent) ?? 0) - 1;
+                inDegree.set(dependent, next);
+                if (next === 0) {
+                    queue.push(dependent);
+                }
+            });
+        }
+
+        const cycleKeys = [];
+        inDegree.forEach((count, key) => {
+            if (count > 0) {
+                cycleKeys.push(key);
+            }
+        });
+
+        return cycleKeys;
+    }
+
+    function updateValidationUI() {
+        root.querySelectorAll('[data-formula-status]').forEach((node) => {
+            const formulaId = node.dataset.formulaStatus;
+            const validation = formulaValidationById.get(formulaId) ?? {
+                status: 'invalid',
+                message: 'Expression is required.',
+            };
+            node.className = `workshop-formula-status ${validation.status === 'valid' ? 'is-valid' : 'is-invalid'}`;
+            node.textContent = validation.message;
+        });
+    }
 
     function flattenResources(tabs) {
         const list = [];
@@ -722,60 +692,536 @@ if (root) {
         }
     }
 
-    root.addEventListener('change', (event) => {
-        const select = event.target.closest('[data-action=\"insert-resource\"]');
-        if (!select || !editable) {
-            return;
-        }
-
-        const formulaId = select.dataset.formulaId;
-        const key = select.value;
-        if (!key) {
-            return;
-        }
-
-        const formula = state.formulas.find((item) => item.id === formulaId);
-        const input = root.querySelector(`input[data-field=\"formula-expression\"][data-formula-id=\"${formulaId}\"]`);
-        if (formula && input) {
-            const token = `|${key}|`;
-            insertAtCursor(input, token);
-            formula.expression = input.value;
-            syncFields();
-        }
-
-        select.value = '';
-    });
-
-    render();
-
     function getAllResources() {
-        const list = [];
+        const unique = new Map();
         state.tabs.forEach((tab) => {
             (tab.resources ?? []).forEach((resource) => {
                 const key = normalizeVariableName(resource.name);
-                list.push({ name: resource.name, key });
+                if (!unique.has(key)) {
+                    unique.set(key, {
+                        name: resource.name,
+                        key,
+                    });
+                }
             });
         });
-        return list;
+        return [...unique.values()];
     }
 
-    function normalizeVariableName(value) {
-        return String(value)
-            .trim()
-            .toLowerCase()
-            .replace(/[^a-z0-9_]/g, '_')
-            .replace(/_+/g, '_')
-            .replace(/^_+|_+$/g, '') || 'var';
+    function getFormulaReferenceItems(currentFormulaId) {
+        return state.formulas
+            .filter((formula) => formula.id !== currentFormulaId)
+            .map((formula, index) => {
+                const key = normalizeVariableName(formula.name || `formula_${index + 1}`);
+                return {
+                    kind: 'formula',
+                    label: formula.name || key,
+                    detail: key,
+                    insertText: key,
+                    cursorOffset: 0,
+                };
+            });
     }
 
-    function insertAtCursor(input, text) {
-        const start = input.selectionStart ?? input.value.length;
-        const end = input.selectionEnd ?? input.value.length;
-        const before = input.value.slice(0, start);
-        const after = input.value.slice(end);
-        input.value = `${before}${text}${after}`;
-        const cursor = start + text.length;
+    function initAutocomplete() {
+        const el = document.createElement('div');
+        el.className = 'workshop-autocomplete is-hidden';
+        el.addEventListener('mousedown', (event) => {
+            const itemEl = event.target.closest('[data-autocomplete-index]');
+            if (!itemEl) {
+                return;
+            }
+            event.preventDefault();
+            const index = Number(itemEl.dataset.autocompleteIndex);
+            selectAutocompleteItem(index);
+        });
+        document.body.appendChild(el);
+        autocomplete.element = el;
+    }
+
+    function openAutocomplete(input, formulaId, force = false) {
+        if (!editable || !autocomplete.element) {
+            return;
+        }
+
+        const context = getAutocompleteContext(input, force);
+        if (!context) {
+            hideAutocomplete();
+            return;
+        }
+
+        const items = buildAutocompleteItems(formulaId, context);
+        if (items.length === 0) {
+            hideAutocomplete();
+            return;
+        }
+
+        autocomplete.input = input;
+        autocomplete.formulaId = formulaId;
+        autocomplete.context = context;
+        autocomplete.items = items;
+        autocomplete.activeIndex = 0;
+
+        renderAutocomplete();
+        positionAutocomplete();
+    }
+
+    function hideAutocomplete() {
+        if (!autocomplete.element) {
+            return;
+        }
+        autocomplete.element.classList.add('is-hidden');
+        autocomplete.input = null;
+        autocomplete.formulaId = null;
+        autocomplete.context = null;
+        autocomplete.items = [];
+        autocomplete.activeIndex = 0;
+    }
+
+    function getAutocompleteContext(input, force = false) {
+        const value = input.value;
+        const cursor = input.selectionStart ?? value.length;
+
+        const tokenStart = value.lastIndexOf('|', cursor - 1);
+        if (tokenStart !== -1) {
+            const tokenEnd = value.indexOf('|', tokenStart + 1);
+            if (tokenEnd === -1 || tokenEnd >= cursor) {
+                return {
+                    mode: 'resource_token',
+                    query: value.slice(tokenStart + 1, cursor),
+                    start: tokenStart,
+                    end: cursor,
+                };
+            }
+        }
+
+        let start = cursor;
+        while (start > 0 && /[a-zA-Z0-9_]/.test(value[start - 1])) {
+            start -= 1;
+        }
+        const query = value.slice(start, cursor);
+
+        if (!force && query.length === 0) {
+            return null;
+        }
+
+        return {
+            mode: 'general',
+            query,
+            start,
+            end: cursor,
+        };
+    }
+
+    function buildAutocompleteItems(formulaId, context) {
+        const query = context.query.toLowerCase();
+        const resources = getAllResources().map((resource) => ({
+            kind: 'resource',
+            label: resource.name,
+            detail: resource.key,
+            insertText: `|${resource.key}|`,
+            cursorOffset: 0,
+        }));
+
+        let items = [];
+        if (context.mode === 'resource_token') {
+            items = resources;
+        } else {
+            items = [
+                ...functionSuggestions.map((item) => ({ kind: 'function', ...item })),
+                ...getFormulaReferenceItems(formulaId),
+                ...resources,
+            ];
+        }
+
+        const filtered = items.filter((item) => {
+            if (query === '') {
+                return true;
+            }
+            return item.label.toLowerCase().includes(query) || item.detail.toLowerCase().includes(query);
+        });
+
+        return filtered.slice(0, 12);
+    }
+
+    function renderAutocomplete() {
+        if (!autocomplete.element) {
+            return;
+        }
+
+        autocomplete.element.innerHTML = '';
+        autocomplete.items.forEach((item, index) => {
+            const option = document.createElement('button');
+            option.type = 'button';
+            option.className = `workshop-autocomplete-item${index === autocomplete.activeIndex ? ' is-active' : ''}`;
+            option.dataset.autocompleteIndex = String(index);
+            option.innerHTML = `<span>${item.label}</span><small>${item.detail}</small>`;
+            autocomplete.element.appendChild(option);
+        });
+
+        autocomplete.element.classList.remove('is-hidden');
+    }
+
+    function positionAutocomplete() {
+        if (!autocomplete.element || !autocomplete.input) {
+            return;
+        }
+
+        const rect = autocomplete.input.getBoundingClientRect();
+        autocomplete.element.style.left = `${rect.left + window.scrollX}px`;
+        autocomplete.element.style.top = `${rect.bottom + window.scrollY + 4}px`;
+        autocomplete.element.style.width = `${Math.max(260, rect.width)}px`;
+    }
+
+    function moveAutocompleteSelection(step) {
+        if (!autocomplete.items.length) {
+            return;
+        }
+        const size = autocomplete.items.length;
+        autocomplete.activeIndex = (autocomplete.activeIndex + step + size) % size;
+        renderAutocomplete();
+        positionAutocomplete();
+    }
+
+    function selectAutocompleteItem(index = autocomplete.activeIndex) {
+        const item = autocomplete.items[index];
+        const input = autocomplete.input;
+        const context = autocomplete.context;
+
+        if (!item || !input || !context) {
+            hideAutocomplete();
+            return;
+        }
+
+        const before = input.value.slice(0, context.start);
+        const after = input.value.slice(context.end);
+        input.value = `${before}${item.insertText}${after}`;
+
+        const cursor = context.start + item.insertText.length + item.cursorOffset;
         input.setSelectionRange(cursor, cursor);
+        input.focus();
         input.dispatchEvent(new Event('input', { bubbles: true }));
+
+        hideAutocomplete();
     }
+
+    function onFormulaExpressionInput(input) {
+        const formulaId = input.dataset.formulaId;
+        openAutocomplete(input, formulaId, false);
+    }
+
+    function onFormulaExpressionKeydown(event) {
+        if (!editable || !event.target.matches('input[data-field="formula-expression"]')) {
+            return;
+        }
+
+        if (event.ctrlKey && event.code === 'Space') {
+            openAutocomplete(event.target, event.target.dataset.formulaId, true);
+            event.preventDefault();
+            return;
+        }
+
+        if (autocomplete.element?.classList.contains('is-hidden')) {
+            return;
+        }
+
+        if (event.key === 'ArrowDown') {
+            moveAutocompleteSelection(1);
+            event.preventDefault();
+            return;
+        }
+
+        if (event.key === 'ArrowUp') {
+            moveAutocompleteSelection(-1);
+            event.preventDefault();
+            return;
+        }
+
+        if (event.key === 'Enter' || event.key === 'Tab') {
+            selectAutocompleteItem();
+            event.preventDefault();
+            return;
+        }
+
+        if (event.key === 'Escape') {
+            hideAutocomplete();
+            event.preventDefault();
+        }
+    }
+
+    function handleFieldInput(event) {
+        if (!editable) {
+            return;
+        }
+
+        const field = event.target.dataset.field;
+        if (!field) {
+            return;
+        }
+
+        if (field === 'tab-name') {
+            const tab = state.tabs.find((item) => item.id === event.target.dataset.tabId);
+            if (tab) {
+                tab.name = event.target.value;
+                const tabButton = root.querySelector(`[data-action="select-tab"][data-tab-id="${tab.id}"]`);
+                if (tabButton) {
+                    tabButton.textContent = tab.name || 'Tab';
+                }
+            }
+            validateFormulas();
+            updateValidationUI();
+            syncFields();
+            return;
+        }
+
+        if (field === 'resource-name') {
+            const tab = state.tabs.find((item) => item.id === event.target.dataset.tabId);
+            const resource = tab?.resources.find((item) => item.id === event.target.dataset.resourceId);
+            if (resource) {
+                resource.name = event.target.value;
+            }
+            validateFormulas();
+            updateValidationUI();
+            syncFields();
+            return;
+        }
+
+        if (field === 'resource-type') {
+            const tab = state.tabs.find((item) => item.id === event.target.dataset.tabId);
+            const resource = tab?.resources.find((item) => item.id === event.target.dataset.resourceId);
+            if (resource) {
+                resource.type = event.target.value;
+            }
+            syncFields();
+            return;
+        }
+
+        if (field === 'formula-name') {
+            const formula = state.formulas.find((item) => item.id === event.target.dataset.formulaId);
+            if (formula) {
+                formula.name = event.target.value;
+            }
+            validateFormulas();
+            updateValidationUI();
+            syncFields();
+            return;
+        }
+
+        if (field === 'formula-expression') {
+            const formula = state.formulas.find((item) => item.id === event.target.dataset.formulaId);
+            if (formula) {
+                formula.expression = event.target.value;
+            }
+            validateFormulas();
+            updateValidationUI();
+            syncFields();
+            onFormulaExpressionInput(event.target);
+        }
+    }
+
+    root.addEventListener('click', (event) => {
+        const actionEl = event.target.closest('[data-action]');
+        if (!actionEl) {
+            return;
+        }
+
+        const action = actionEl.dataset.action;
+        if (!editable && action !== 'select-tab') {
+            return;
+        }
+
+        if (action === 'select-tab') {
+            setActiveTab(actionEl.dataset.tabId);
+            return;
+        }
+
+        if (action === 'add-tab') {
+            const tab = createDefaultTab(`Tab ${state.tabs.length + 1}`, state.tabs.length);
+            state.tabs.push(tab);
+            setActiveTab(tab.id);
+            render();
+            return;
+        }
+
+        if (action === 'remove-tab') {
+            if (state.tabs.length <= 1) {
+                alert('At least one tab is required.');
+                return;
+            }
+            const tabId = actionEl.dataset.tabId;
+            state.tabs = state.tabs.filter((tab) => tab.id !== tabId);
+            if (activeTabId === tabId) {
+                activeTabId = state.tabs[0]?.id ?? null;
+            }
+            render();
+            return;
+        }
+
+        if (action === 'add-resource') {
+            if (state.tabs.length === 0) {
+                const tab = createDefaultTab('Tab 1', 0);
+                state.tabs.push(tab);
+                activeTabId = tab.id;
+            }
+
+            const tab = getActiveTab() ?? state.tabs[0];
+            const column = getColumnResources(tab, 0).length <= getColumnResources(tab, 1).length ? 0 : 1;
+            const order = getColumnResources(tab, column).length;
+            tab.resources.push({
+                id: createId('res'),
+                name: `Resource ${tab.resources.length + 1}`,
+                type: 'text',
+                position: { column, order },
+            });
+            render();
+            return;
+        }
+
+        if (action === 'remove-resource') {
+            const tabId = actionEl.dataset.tabId;
+            const resourceId = actionEl.dataset.resourceId;
+            const tab = state.tabs.find((item) => item.id === tabId);
+            if (tab) {
+                const removed = removeResourceFromTab(tab, resourceId);
+                if (removed) {
+                    reindexColumn(tab, removed.position?.column ?? 0);
+                }
+            }
+            render();
+            return;
+        }
+
+        if (action === 'add-formula') {
+            state.formulas.push({
+                id: createId('formula'),
+                name: `Formula ${state.formulas.length + 1}`,
+                expression: '',
+            });
+            render();
+            return;
+        }
+
+        if (action === 'remove-formula') {
+            const formulaId = actionEl.dataset.formulaId;
+            state.formulas = state.formulas.filter((formula) => formula.id !== formulaId);
+            render();
+            return;
+        }
+
+        if (action === 'open-autocomplete') {
+            const formulaId = actionEl.dataset.formulaId;
+            const input = root.querySelector(`input[data-field="formula-expression"][data-formula-id="${formulaId}"]`);
+            if (input) {
+                input.focus();
+                openAutocomplete(input, formulaId, true);
+            }
+        }
+    });
+
+    root.addEventListener('input', handleFieldInput);
+    root.addEventListener('change', handleFieldInput);
+    root.addEventListener('keydown', onFormulaExpressionKeydown);
+
+    root.addEventListener('focusin', (event) => {
+        if (!editable || !event.target.matches('input[data-field="formula-expression"]')) {
+            return;
+        }
+        validateFormulas();
+        updateValidationUI();
+    });
+
+    root.addEventListener('dragstart', (event) => {
+        if (!editable) {
+            return;
+        }
+        const card = event.target.closest('.workshop-resource-card');
+        if (!card) {
+            return;
+        }
+        dragState = {
+            resourceId: card.dataset.resourceId,
+            tabId: card.dataset.tabId,
+        };
+        card.classList.add('is-dragging');
+        if (event.dataTransfer) {
+            event.dataTransfer.effectAllowed = 'move';
+        }
+    });
+
+    root.addEventListener('dragend', (event) => {
+        const card = event.target.closest('.workshop-resource-card');
+        if (card) {
+            card.classList.remove('is-dragging');
+        }
+        dragState = null;
+    });
+
+    root.addEventListener('dragover', (event) => {
+        if (!editable || !dragState) {
+            return;
+        }
+        const column = event.target.closest('[data-column]');
+        const card = event.target.closest('.workshop-resource-card');
+        if (!column && !card) {
+            return;
+        }
+        event.preventDefault();
+        if (event.dataTransfer) {
+            event.dataTransfer.dropEffect = 'move';
+        }
+    });
+
+    root.addEventListener('drop', (event) => {
+        if (!editable || !dragState) {
+            return;
+        }
+        const card = event.target.closest('.workshop-resource-card');
+        const columnEl = event.target.closest('[data-column]');
+        if (!columnEl && !card) {
+            return;
+        }
+        event.preventDefault();
+
+        const targetColumn = Number((columnEl ?? card.closest('[data-column]'))?.dataset.column ?? 0);
+        const targetTabId = (columnEl ?? card).closest('[data-column]')?.dataset.tabId;
+        if (!targetTabId) {
+            return;
+        }
+
+        moveResource({
+            fromTabId: dragState.tabId,
+            resourceId: dragState.resourceId,
+            toTabId: targetTabId,
+            toColumn: targetColumn,
+            beforeResourceId: card?.dataset.resourceId ?? null,
+        });
+
+        render();
+    });
+
+    document.addEventListener('click', (event) => {
+        if (!editable || !autocomplete.element) {
+            return;
+        }
+        const target = event.target;
+        if (autocomplete.element.contains(target)) {
+            return;
+        }
+        if (target.closest('input[data-field="formula-expression"]')) {
+            return;
+        }
+        if (target.closest('[data-action="open-autocomplete"]')) {
+            return;
+        }
+        hideAutocomplete();
+    });
+
+    window.addEventListener('resize', () => {
+        if (!autocomplete.element || autocomplete.element.classList.contains('is-hidden')) {
+            return;
+        }
+        positionAutocomplete();
+    });
+
+    render();
 }
