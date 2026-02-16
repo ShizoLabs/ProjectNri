@@ -561,7 +561,7 @@ body {
 
 .workshop-formula-row {
     display: grid;
-    grid-template-columns: 0.8fr 1.6fr auto auto;
+    grid-template-columns: 0.8fr 1.6fr auto auto auto;
     gap: 0.6rem;
     align-items: start;
     background: #1f1f1f;
@@ -590,6 +590,18 @@ body {
 }
 
 .workshop-formula-status.is-invalid {
+    color: #f5a4a4;
+}
+
+.workshop-formula-preview {
+    font-size: 1.2rem;
+}
+
+.workshop-formula-preview.is-ok {
+    color: #8ddf9f;
+}
+
+.workshop-formula-preview.is-error {
     color: #f5a4a4;
 }
 

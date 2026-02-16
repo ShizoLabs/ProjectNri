@@ -1,12 +1,18 @@
 import { Parser } from 'https://cdn.jsdelivr.net/npm/expr-eval@2.0.2/dist/index.mjs';
+import { computeAll } from './formulaEngine.js';
 
+// Корневой узел конструктора системы.
 const root = document.querySelector('[data-workshop-builder]');
 
 if (root) {
+    // Флаг режима редактирования. В режиме просмотра изменения отключены.
     const editable = root.dataset.editable === 'true';
+    // Начальные данные системы, приходящие из Twig (window.WORKSHOP_SYSTEM).
     const payload = window.WORKSHOP_SYSTEM ?? {};
 
+    // Локальный парсер выражений для валидации формул в реальном времени.
     const parser = createExpressionParser();
+    // Набор подсказок по встроенным функциям, которые можно быстро вставлять в выражение.
     const functionSuggestions = [
         { label: 'floor(x)', detail: 'function', insertText: 'floor()', cursorOffset: -1 },
         { label: 'min(a, b)', detail: 'function', insertText: 'min(, )', cursorOffset: -3 },
@@ -17,12 +23,15 @@ if (root) {
         { label: 'round(x)', detail: 'function', insertText: 'round()', cursorOffset: -1 },
     ];
 
+    // Карта старых ресурсов нужна для обратной совместимости с предыдущей структурой данных.
     const legacyResourceMap = buildLegacyResourceMap(payload.resources);
     const tabs = normalizeTabs(payload.tabs, legacyResourceMap);
+    // В системе всегда должна существовать хотя бы одна вкладка.
     if (tabs.length === 0) {
         tabs.push(createDefaultTab('Tab 1', 0));
     }
 
+    // Единое состояние конструктора, которое сериализуется в скрытые поля формы.
     const state = {
         settings: payload.settings ?? {},
         tabs,
@@ -30,11 +39,16 @@ if (root) {
         meta: payload.meta ?? {},
     };
 
+    // Результаты валидации каждой формулы (по id).
     const formulaValidationById = new Map();
+    // Результаты предпросмотра вычисления каждой формулы (по id).
+    const formulaPreviewById = new Map();
 
+    // Идентификатор активной вкладки и временное состояние drag-and-drop ресурсов.
     let activeTabId = state.tabs[0]?.id ?? null;
     let dragState = null;
 
+    // Состояние всплывающего автокомплита формул.
     const autocomplete = {
         element: null,
         input: null,
@@ -44,21 +58,26 @@ if (root) {
         activeIndex: 0,
     };
 
+    // Ссылки на скрытые поля формы, в которые записывается JSON.
     const fields = {};
     document.querySelectorAll('[data-workshop-field]').forEach((field) => {
         fields[field.dataset.workshopField] = field;
     });
 
+    // Автокомплит нужен только в режиме редактирования.
     if (editable) {
         initAutocomplete();
     }
 
+    // Создание безопасного парсера выражений для клиентской проверки формул.
     function createExpressionParser() {
         const exprParser = new Parser({
             operators: {
                 assignment: false,
             },
         });
+        // Пользовательская функция dice(count, sides) для совместимости с RPG-нотацией.
+        // Для проверки синтаксиса возвращаем детерминированное безопасное значение.
         exprParser.functions.dice = (count, sides) => {
             const safeCount = Math.max(0, Math.floor(Number(count)) || 0);
             const safeSides = Math.max(1, Math.floor(Number(sides)) || 1);
@@ -67,6 +86,7 @@ if (root) {
         return exprParser;
     }
 
+    // Нормализация вкладок, включая поддержку старых данных (elements -> resources).
     function normalizeTabs(list, legacyMap) {
         if (!Array.isArray(list)) {
             return [];
@@ -108,6 +128,7 @@ if (root) {
         });
     }
 
+    // Нормализация ресурса вкладки с гарантией обязательных полей и позиции.
     function normalizeResource(resource, resourceIndex) {
         const safe = isPlainObject(resource) ? resource : {};
         if (!isNonEmptyString(safe.id)) {
@@ -127,6 +148,7 @@ if (root) {
         return safe;
     }
 
+    // Нормализация формул: id, name, expression всегда присутствуют.
     function normalizeFormulas(list) {
         if (!Array.isArray(list)) {
             return [];
@@ -143,6 +165,7 @@ if (root) {
         });
     }
 
+    // Вспомогательные проверки типов.
     function isPlainObject(value) {
         return typeof value === 'object' && value !== null && !Array.isArray(value);
     }
@@ -155,6 +178,7 @@ if (root) {
         return value !== null && value !== '' && !Number.isNaN(Number(value));
     }
 
+    // Генератор уникального id для вкладок/ресурсов/формул.
     function createId(prefix) {
         if (window.crypto?.randomUUID) {
             return `${prefix}-${window.crypto.randomUUID()}`;
@@ -162,6 +186,7 @@ if (root) {
         return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
     }
 
+    // Нормализация имени в идентификатор переменной формулы.
     function normalizeVariableName(value) {
         return String(value)
             .trim()
@@ -171,6 +196,9 @@ if (root) {
             .replace(/^_+|_+$/g, '') || 'var';
     }
 
+    // Подготовка выражения к парсингу:
+    // 1) токены вида |resource| превращаются в безопасные ключи;
+    // 2) RPG-нотация NdM превращается в dice(N, M).
     function normalizeExpressionForParser(expression) {
         const withTokens = String(expression).replace(/\|([^|]+)\|/g, (_, name) => normalizeVariableName(name));
         return withTokens.replace(/\b(\d+)?\s*d\s*(\d+)\b/gi, (_, count, sides) => {
@@ -179,6 +207,7 @@ if (root) {
         });
     }
 
+    // Сбор карты legacy-ресурсов по id, чтобы переносить старые элементы корректно.
     function buildLegacyResourceMap(list) {
         const map = {};
         if (!Array.isArray(list)) {
@@ -198,6 +227,7 @@ if (root) {
         return map;
     }
 
+    // Создание вкладки по умолчанию.
     function createDefaultTab(name, order) {
         return {
             id: createId('tab'),
@@ -207,16 +237,19 @@ if (root) {
         };
     }
 
+    // Текущая активная вкладка.
     function getActiveTab() {
         return state.tabs.find((tab) => tab.id === activeTabId) ?? null;
     }
 
+    // Переключение активной вкладки с перерисовкой UI вкладок.
     function setActiveTab(tabId) {
         activeTabId = tabId;
         renderTabsBar();
         renderTabPanel();
     }
 
+    // Синхронизация состояния конструктора в скрытые поля формы (JSON).
     function syncFields() {
         if (fields.settings) {
             fields.settings.value = JSON.stringify(state.settings ?? {});
@@ -235,15 +268,18 @@ if (root) {
         }
     }
 
+    // Централизованный рендер интерфейса конструктора.
     function render() {
         validateFormulas();
         renderTabsBar();
         renderTabPanel();
         renderFormulasPanel();
         updateValidationUI();
+        updatePreviewUI();
         syncFields();
     }
 
+    // Рендер верхней панели вкладок.
     function renderTabsBar() {
         const tabsBar = root.querySelector('[data-tabs-bar]');
         if (!tabsBar) {
@@ -270,6 +306,7 @@ if (root) {
         });
     }
 
+    // Рендер содержимого активной вкладки и двух колонок ресурсов.
     function renderTabPanel() {
         const panel = root.querySelector('[data-tab-panel]');
         if (!panel) {
@@ -320,6 +357,7 @@ if (root) {
         const columnsWrapper = document.createElement('div');
         columnsWrapper.className = 'workshop-columns';
 
+        // Рисуем строго две колонки: A и B.
         [0, 1].forEach((column) => {
             const columnEl = document.createElement('div');
             columnEl.className = 'workshop-column';
@@ -404,6 +442,7 @@ if (root) {
         panel.appendChild(columnsWrapper);
     }
 
+    // Рендер списка формул, их полей и служебных кнопок.
     function renderFormulasPanel() {
         const panel = root.querySelector('[data-formulas-list]');
         if (!panel) {
@@ -446,17 +485,32 @@ if (root) {
                 expressionInput.disabled = true;
             }
 
+            // Строка статуса валидации выражения.
             const status = document.createElement('div');
             status.className = 'workshop-formula-status';
             status.dataset.formulaStatus = formula.id;
 
+            // Строка результата предпросмотра вычисления.
+            const preview = document.createElement('div');
+            preview.className = 'workshop-formula-preview';
+            preview.dataset.formulaPreview = formula.id;
+
             expressionWrap.appendChild(expressionInput);
             expressionWrap.appendChild(status);
+            expressionWrap.appendChild(preview);
 
             row.appendChild(nameInput);
             row.appendChild(expressionWrap);
 
             if (editable) {
+                const previewBtn = document.createElement('button');
+                previewBtn.type = 'button';
+                previewBtn.className = 'workshop-inline-btn';
+                previewBtn.dataset.action = 'preview-formula';
+                previewBtn.dataset.formulaId = formula.id;
+                previewBtn.textContent = 'Preview';
+                row.appendChild(previewBtn);
+
                 const suggestBtn = document.createElement('button');
                 suggestBtn.type = 'button';
                 suggestBtn.className = 'workshop-inline-btn';
@@ -478,12 +532,17 @@ if (root) {
         });
     }
 
+    // Полная валидация всех формул:
+    // - проверка синтаксиса;
+    // - проверка неизвестных ссылок;
+    // - проверка циклических зависимостей.
     function validateFormulas() {
         formulaValidationById.clear();
 
         const resources = getAllResources();
         const resourceKeys = new Set(resources.map((resource) => resource.key));
 
+        // Рабочее представление формул для построения графа зависимостей.
         const entries = state.formulas.map((formula, index) => ({
             id: formula.id,
             key: normalizeVariableName(formula.name || `formula_${index + 1}`),
@@ -516,6 +575,7 @@ if (root) {
             }
 
             try {
+                // Парсим выражение с уже нормализованными токенами.
                 const normalized = normalizeExpressionForParser(expression);
                 const parsed = parser.parse(normalized);
                 const variables = parsed.variables().map((item) => normalizeVariableName(item));
@@ -542,6 +602,7 @@ if (root) {
             });
         });
 
+        // Отдельно отмечаем формулы, попавшие в цикл зависимостей.
         const cycleKeys = detectCycleKeys(depsByKey);
         cycleKeys.forEach((cycleKey) => {
             (keyToIds.get(cycleKey) ?? []).forEach((formulaId) => {
@@ -553,6 +614,8 @@ if (root) {
         });
     }
 
+    // Поиск циклов через алгоритм топологической обработки (Kahn-like).
+    // Формулы с остаточной входящей степенью считаются циклическими.
     function detectCycleKeys(depsByKey) {
         const inDegree = new Map();
         const dependentsByKey = new Map();
@@ -596,6 +659,7 @@ if (root) {
         return cycleKeys;
     }
 
+    // Перенос результатов валидации в DOM.
     function updateValidationUI() {
         root.querySelectorAll('[data-formula-status]').forEach((node) => {
             const formulaId = node.dataset.formulaStatus;
@@ -608,6 +672,22 @@ if (root) {
         });
     }
 
+    // Перенос результатов предпросмотра вычислений в DOM.
+    function updatePreviewUI() {
+        root.querySelectorAll('[data-formula-preview]').forEach((node) => {
+            const formulaId = node.dataset.formulaPreview;
+            const preview = formulaPreviewById.get(formulaId);
+            if (!preview) {
+                node.className = 'workshop-formula-preview';
+                node.textContent = '';
+                return;
+            }
+            node.className = `workshop-formula-preview ${preview.status === 'ok' ? 'is-ok' : 'is-error'}`;
+            node.textContent = preview.message;
+        });
+    }
+
+    // Сериализация ресурсов вкладок в плоский список (совместимость с текущей моделью хранения).
     function flattenResources(tabs) {
         const list = [];
         tabs.forEach((tab) => {
@@ -626,12 +706,14 @@ if (root) {
         return list;
     }
 
+    // Получение ресурсов конкретной колонки с сортировкой по order.
     function getColumnResources(tab, column) {
         return (tab.resources ?? [])
             .filter((resource) => (resource.position?.column ?? 0) === column)
             .sort((a, b) => (a.position?.order ?? 0) - (b.position?.order ?? 0));
     }
 
+    // Удаление ресурса из вкладки по id.
     function removeResourceFromTab(tab, resourceId) {
         const index = tab.resources.findIndex((resource) => resource.id === resourceId);
         if (index === -1) {
@@ -640,11 +722,13 @@ if (root) {
         return tab.resources.splice(index, 1)[0];
     }
 
+    // Замена ресурсов одной колонки с сохранением ресурсов другой колонки.
     function replaceColumnResources(tab, column, columnResources) {
         const others = (tab.resources ?? []).filter((resource) => (resource.position?.column ?? 0) !== column);
         tab.resources = others.concat(columnResources);
     }
 
+    // Пересчёт order внутри одной колонки.
     function reindexColumn(tab, column) {
         const columnResources = getColumnResources(tab, column);
         columnResources.forEach((resource, index) => {
@@ -655,6 +739,7 @@ if (root) {
         replaceColumnResources(tab, column, columnResources);
     }
 
+    // Перемещение ресурса между колонками/вкладками (drag-and-drop) с корректным order.
     function moveResource({ fromTabId, resourceId, toTabId, toColumn, beforeResourceId }) {
         const fromTab = state.tabs.find((tab) => tab.id === fromTabId);
         const toTab = state.tabs.find((tab) => tab.id === toTabId);
@@ -692,6 +777,8 @@ if (root) {
         }
     }
 
+    // Собираем уникальный список ресурсов из всех вкладок.
+    // Используется для автокомплита и валидации ссылок.
     function getAllResources() {
         const unique = new Map();
         state.tabs.forEach((tab) => {
@@ -701,6 +788,7 @@ if (root) {
                     unique.set(key, {
                         name: resource.name,
                         key,
+                        type: resource.type ?? 'text',
                     });
                 }
             });
@@ -708,6 +796,83 @@ if (root) {
         return [...unique.values()];
     }
 
+    // Значение по умолчанию для предпросмотра вычислений формул.
+    function getPreviewDefaultByType(type) {
+        if (type === 'number') {
+            return 10;
+        }
+        if (type === 'boolean') {
+            return 1;
+        }
+        return 0;
+    }
+
+    // Подготовка входных значений для предпросмотра формул.
+    function buildPreviewTokenValues() {
+        const values = {};
+        getAllResources().forEach((resource) => {
+            values[resource.key] = getPreviewDefaultByType(resource.type);
+        });
+        return values;
+    }
+
+    // Преобразование формул из состояния в формат движка `computeAll`.
+    function buildComputeFormulas() {
+        return state.formulas.map((formula, index) => ({
+            id: formula.id,
+            name: formula.name,
+            key: normalizeVariableName(formula.name || `formula_${index + 1}`),
+            expression: formula.expression ?? '',
+        }));
+    }
+
+    // Запуск предпросмотра конкретной формулы:
+    // 1) проверяем валидность,
+    // 2) считаем через общий движок формул,
+    // 3) сохраняем результат/ошибку в `formulaPreviewById`.
+    function runFormulaPreview(formulaId) {
+        validateFormulas();
+        const validation = formulaValidationById.get(formulaId);
+        if (!validation || validation.status !== 'valid') {
+            formulaPreviewById.set(formulaId, {
+                status: 'error',
+                message: validation?.message ?? 'Formula is invalid.',
+            });
+            updateValidationUI();
+            updatePreviewUI();
+            return;
+        }
+
+        const formula = state.formulas.find((item) => item.id === formulaId);
+        if (!formula) {
+            return;
+        }
+
+        const formulaKey = normalizeVariableName(formula.name);
+        try {
+            const values = computeAll(buildPreviewTokenValues(), buildComputeFormulas());
+            const result = values[formulaKey];
+            if (result === null || result === undefined || Number.isNaN(result)) {
+                formulaPreviewById.set(formulaId, {
+                    status: 'error',
+                    message: 'Preview failed to compute value.',
+                });
+            } else {
+                formulaPreviewById.set(formulaId, {
+                    status: 'ok',
+                    message: `Preview result: ${result} (defaults: number=10, boolean=1, other=0)`,
+                });
+            }
+        } catch (error) {
+            formulaPreviewById.set(formulaId, {
+                status: 'error',
+                message: `Preview error: ${error.message}`,
+            });
+        }
+        updatePreviewUI();
+    }
+
+    // Список ссылок на другие формулы для автокомплита.
     function getFormulaReferenceItems(currentFormulaId) {
         return state.formulas
             .filter((formula) => formula.id !== currentFormulaId)
@@ -723,6 +888,7 @@ if (root) {
             });
     }
 
+    // Инициализация popup-элемента автокомплита в `document.body`.
     function initAutocomplete() {
         const el = document.createElement('div');
         el.className = 'workshop-autocomplete is-hidden';
@@ -739,6 +905,7 @@ if (root) {
         autocomplete.element = el;
     }
 
+    // Открытие автокомплита для конкретного поля выражения.
     function openAutocomplete(input, formulaId, force = false) {
         if (!editable || !autocomplete.element) {
             return;
@@ -766,6 +933,7 @@ if (root) {
         positionAutocomplete();
     }
 
+    // Закрытие и очистка состояния автокомплита.
     function hideAutocomplete() {
         if (!autocomplete.element) {
             return;
@@ -778,6 +946,9 @@ if (root) {
         autocomplete.activeIndex = 0;
     }
 
+    // Определение контекста автокомплита:
+    // - `resource_token`: курсор внутри конструкции `|...|`
+    // - `general`: обычный ввод идентификатора/функции.
     function getAutocompleteContext(input, force = false) {
         const value = input.value;
         const cursor = input.selectionStart ?? value.length;
@@ -813,6 +984,7 @@ if (root) {
         };
     }
 
+    // Формирование списка подсказок на основе контекста ввода.
     function buildAutocompleteItems(formulaId, context) {
         const query = context.query.toLowerCase();
         const resources = getAllResources().map((resource) => ({
@@ -844,6 +1016,7 @@ if (root) {
         return filtered.slice(0, 12);
     }
 
+    // Отрисовка пунктов popup-автокомплита.
     function renderAutocomplete() {
         if (!autocomplete.element) {
             return;
@@ -862,6 +1035,7 @@ if (root) {
         autocomplete.element.classList.remove('is-hidden');
     }
 
+    // Позиционирование popup под полем выражения.
     function positionAutocomplete() {
         if (!autocomplete.element || !autocomplete.input) {
             return;
@@ -873,6 +1047,7 @@ if (root) {
         autocomplete.element.style.width = `${Math.max(260, rect.width)}px`;
     }
 
+    // Перемещение активного пункта стрелками вверх/вниз.
     function moveAutocompleteSelection(step) {
         if (!autocomplete.items.length) {
             return;
@@ -883,6 +1058,7 @@ if (root) {
         positionAutocomplete();
     }
 
+    // Вставка выбранного автокомплит-пункта в позицию курсора.
     function selectAutocompleteItem(index = autocomplete.activeIndex) {
         const item = autocomplete.items[index];
         const input = autocomplete.input;
@@ -905,11 +1081,14 @@ if (root) {
         hideAutocomplete();
     }
 
+    // Реакция на ввод в поле выражения:
+    // запускаем/обновляем автокомплит по текущему контексту.
     function onFormulaExpressionInput(input) {
         const formulaId = input.dataset.formulaId;
         openAutocomplete(input, formulaId, false);
     }
 
+    // Горячие клавиши поля выражения для работы с автокомплитом.
     function onFormulaExpressionKeydown(event) {
         if (!editable || !event.target.matches('input[data-field="formula-expression"]')) {
             return;
@@ -949,6 +1128,7 @@ if (root) {
         }
     }
 
+    // Универсальный обработчик изменений всех управляемых полей конструктора.
     function handleFieldInput(event) {
         if (!editable) {
             return;
@@ -980,8 +1160,10 @@ if (root) {
             if (resource) {
                 resource.name = event.target.value;
             }
+            formulaPreviewById.clear();
             validateFormulas();
             updateValidationUI();
+            updatePreviewUI();
             syncFields();
             return;
         }
@@ -992,6 +1174,8 @@ if (root) {
             if (resource) {
                 resource.type = event.target.value;
             }
+            formulaPreviewById.clear();
+            updatePreviewUI();
             syncFields();
             return;
         }
@@ -1001,8 +1185,10 @@ if (root) {
             if (formula) {
                 formula.name = event.target.value;
             }
+            formulaPreviewById.delete(event.target.dataset.formulaId);
             validateFormulas();
             updateValidationUI();
+            updatePreviewUI();
             syncFields();
             return;
         }
@@ -1012,13 +1198,16 @@ if (root) {
             if (formula) {
                 formula.expression = event.target.value;
             }
+            formulaPreviewById.delete(event.target.dataset.formulaId);
             validateFormulas();
             updateValidationUI();
+            updatePreviewUI();
             syncFields();
             onFormulaExpressionInput(event.target);
         }
     }
 
+    // Делегирование кликов по всем кнопкам интерфейса конструктора.
     root.addEventListener('click', (event) => {
         const actionEl = event.target.closest('[data-action]');
         if (!actionEl) {
@@ -1097,6 +1286,7 @@ if (root) {
                 name: `Formula ${state.formulas.length + 1}`,
                 expression: '',
             });
+            formulaPreviewById.clear();
             render();
             return;
         }
@@ -1104,7 +1294,13 @@ if (root) {
         if (action === 'remove-formula') {
             const formulaId = actionEl.dataset.formulaId;
             state.formulas = state.formulas.filter((formula) => formula.id !== formulaId);
+            formulaPreviewById.delete(formulaId);
             render();
+            return;
+        }
+
+        if (action === 'preview-formula') {
+            runFormulaPreview(actionEl.dataset.formulaId);
             return;
         }
 
@@ -1118,10 +1314,12 @@ if (root) {
         }
     });
 
+    // Подписки на основные события редактирования.
     root.addEventListener('input', handleFieldInput);
     root.addEventListener('change', handleFieldInput);
     root.addEventListener('keydown', onFormulaExpressionKeydown);
 
+    // При фокусе на выражении обновляем статус валидации.
     root.addEventListener('focusin', (event) => {
         if (!editable || !event.target.matches('input[data-field="formula-expression"]')) {
             return;
@@ -1130,6 +1328,7 @@ if (root) {
         updateValidationUI();
     });
 
+    // События drag-and-drop для переноса ресурсов между колонками.
     root.addEventListener('dragstart', (event) => {
         if (!editable) {
             return;
@@ -1199,6 +1398,7 @@ if (root) {
         render();
     });
 
+    // Закрытие автокомплита при клике вне поля ввода/кнопки автокомплита.
     document.addEventListener('click', (event) => {
         if (!editable || !autocomplete.element) {
             return;
@@ -1216,6 +1416,7 @@ if (root) {
         hideAutocomplete();
     });
 
+    // Перепозиционирование popup при ресайзе окна.
     window.addEventListener('resize', () => {
         if (!autocomplete.element || autocomplete.element.classList.contains('is-hidden')) {
             return;
@@ -1223,5 +1424,6 @@ if (root) {
         positionAutocomplete();
     });
 
+    // Первичная отрисовка конструктора.
     render();
 }
