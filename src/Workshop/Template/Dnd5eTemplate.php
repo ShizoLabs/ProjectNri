@@ -37,4 +37,31 @@ class Dnd5eTemplate extends AbstractSystemTemplate
             ['key' => 'strength_save', 'expression' => '1d20 + strength_mod + proficiency'],
         ];
     }
+
+    public function getSheetTemplates(): array
+    {
+        return [
+            [
+                'name' => 'Player Character',
+                'type' => 'character',
+                'fields' => [
+                    ['label' => 'Strength', 'kind' => 'resource', 'sourceKey' => 'strength', 'inputType' => 'number'],
+                    ['label' => 'Dexterity', 'kind' => 'resource', 'sourceKey' => 'dexterity', 'inputType' => 'number'],
+                    ['label' => 'Constitution', 'kind' => 'resource', 'sourceKey' => 'constitution', 'inputType' => 'number'],
+                    ['label' => 'Hit Points', 'kind' => 'local', 'sourceKey' => 'hit_points', 'inputType' => 'number'],
+                    ['label' => 'Initiative', 'kind' => 'formula', 'sourceKey' => 'initiative', 'inputType' => 'number'],
+                ],
+            ],
+            [
+                'name' => 'Monster',
+                'type' => 'monster',
+                'fields' => [
+                    ['label' => 'Strength', 'kind' => 'resource', 'sourceKey' => 'strength', 'inputType' => 'number'],
+                    ['label' => 'Dexterity', 'kind' => 'resource', 'sourceKey' => 'dexterity', 'inputType' => 'number'],
+                    ['label' => 'Armor Class', 'kind' => 'local', 'sourceKey' => 'armor_class', 'inputType' => 'number'],
+                    ['label' => 'Hit Points', 'kind' => 'local', 'sourceKey' => 'hit_points', 'inputType' => 'number'],
+                ],
+            ],
+        ];
+    }
 }

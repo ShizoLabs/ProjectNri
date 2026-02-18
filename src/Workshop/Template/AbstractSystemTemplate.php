@@ -13,4 +13,9 @@ abstract class AbstractSystemTemplate implements SystemTemplateInterface
     {
         return [];
     }
+
+    public function getSheetTemplates(): array
+    {
+        return [];
+    }
 }

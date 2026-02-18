@@ -1,0 +1,29 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Sheet Templates{% endblock %}
+
+{% block body %}
+<div class="index-workshop-content">
+    <h1>Sheet Templates</h1>
+
+    {% if systems is empty %}
+        <p>No workshop systems available.</p>
+    {% else %}
+        <ul class="system-list">
+            {% for system in systems %}
+                <li>
+                    <div>
+                        <a href="{{ path('sheet_template_edit', {id: system.id}) }}">{{ system.name }}</a>
+                        <div class="workshop-system-subtitle">
+                            {{ system.sheetTemplates|length }} template(s)
+                        </div>
+                    </div>
+                    <div class="system-actions">
+                        <a class="system-edit-link" href="{{ path('sheet_template_edit', {id: system.id}) }}">Edit sheet templates</a>
+                    </div>
+                </li>
+            {% endfor %}
+        </ul>
+    {% endif %}
+</div>
+{% endblock %}

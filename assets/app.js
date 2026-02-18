@@ -1,4 +1,5 @@
 import './styles/app.css';
+import './tokenForm.js';
 
 $(document).ready(function() {
     // Open modal
@@ -10,6 +11,7 @@ $(document).ready(function() {
         $.get(url, function (html) {
             $('#modal-root').html(html);
             $('#modal-root .modal-overlay').fadeIn(200);
+            document.dispatchEvent(new CustomEvent('modal:content-updated'));
         });
     });
     // Close modal
@@ -45,6 +47,7 @@ $(document).ready(function() {
                 }
                 // Else validation error
                 $('#modal-root').html(response);
+                document.dispatchEvent(new CustomEvent('modal:content-updated'));
             },
             error: function (xhr) {
                 console.error('AJAX error:', xhr);

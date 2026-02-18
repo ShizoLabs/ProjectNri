@@ -9,4 +9,5 @@ interface SystemTemplateInterface
 
     public function getResources(): array;
     public function getFormulas(): array;
+    public function getSheetTemplates(): array;
 }

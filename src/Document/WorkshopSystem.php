@@ -32,6 +32,9 @@ class WorkshopSystem
     #[ODM\Field(type: 'collection')]
     private array $formulas = [];
 
+    #[ODM\Field(type: 'collection')]
+    private array $sheetTemplates = [];
+
     #[ODM\Field(type: 'hash')]
     private array $meta = [];
 
@@ -98,6 +101,11 @@ class WorkshopSystem
         return $this->meta;
     }
 
+    public function getSheetTemplates(): array
+    {
+        return $this->sheetTemplates;
+    }
+
     public function getCreatedAt(): \DateTime
     {
         return $this->createdAt;
@@ -160,6 +168,13 @@ class WorkshopSystem
     public function setMeta(array $meta): self
     {
         $this->meta = $meta;
+
+        return $this;
+    }
+
+    public function setSheetTemplates(array $sheetTemplates): self
+    {
+        $this->sheetTemplates = $sheetTemplates;
 
         return $this;
     }
@@ -306,7 +321,153 @@ class WorkshopSystem
             }
         }
 
+        $errors = array_merge($errors, $this->validateSheetTemplates());
+
         return $errors;
+    }
+
+    public function validateSheetTemplates(): array
+    {
+        $errors = [];
+        $resourceKeys = $this->buildResourceKeysFromTabs();
+        $formulaKeys = $this->buildFormulaKeys();
+        $templateIds = [];
+
+        foreach ($this->sheetTemplates as $templateIndex => $template) {
+            if (!is_array($template)) {
+                $errors[] = sprintf('Sheet template #%d must be an object.', $templateIndex + 1);
+                continue;
+            }
+
+            if (!$this->isNonEmptyString($template['id'] ?? null)) {
+                $errors[] = sprintf('Sheet template #%d requires an id.', $templateIndex + 1);
+            } else {
+                $templateIds[] = $template['id'];
+            }
+
+            if (!$this->isNonEmptyString($template['name'] ?? null)) {
+                $errors[] = sprintf('Sheet template #%d requires a name.', $templateIndex + 1);
+            }
+
+            $templateType = $template['type'] ?? null;
+            if (!$this->isNonEmptyString($templateType) || !in_array($templateType, ['character', 'monster', 'object'], true)) {
+                $errors[] = sprintf('Sheet template #%d type must be character, monster, or object.', $templateIndex + 1);
+            }
+
+            if (isset($template['fields']) && !is_array($template['fields'])) {
+                $errors[] = sprintf('Sheet template #%d fields must be a list.', $templateIndex + 1);
+                continue;
+            }
+
+            foreach (($template['fields'] ?? []) as $fieldIndex => $field) {
+                if (!is_array($field)) {
+                    $errors[] = sprintf('Sheet template #%d field #%d must be an object.', $templateIndex + 1, $fieldIndex + 1);
+                    continue;
+                }
+
+                if (!$this->isNonEmptyString($field['id'] ?? null)) {
+                    $errors[] = sprintf('Sheet template #%d field #%d requires an id.', $templateIndex + 1, $fieldIndex + 1);
+                }
+
+                if (!$this->isNonEmptyString($field['label'] ?? null)) {
+                    $errors[] = sprintf('Sheet template #%d field #%d requires a label.', $templateIndex + 1, $fieldIndex + 1);
+                }
+
+                if (!$this->isNonEmptyString($field['key'] ?? null)) {
+                    $errors[] = sprintf('Sheet template #%d field #%d requires a key.', $templateIndex + 1, $fieldIndex + 1);
+                }
+
+                $fieldKind = $field['kind'] ?? null;
+                if (!$this->isNonEmptyString($fieldKind) || !in_array($fieldKind, ['resource', 'formula', 'local'], true)) {
+                    $errors[] = sprintf('Sheet template #%d field #%d kind must be resource, formula, or local.', $templateIndex + 1, $fieldIndex + 1);
+                    continue;
+                }
+
+                $sourceKey = $field['sourceKey'] ?? null;
+                if ($fieldKind === 'resource') {
+                    if (!$this->isNonEmptyString($sourceKey) || !in_array((string) $sourceKey, $resourceKeys, true)) {
+                        $errors[] = sprintf('Sheet template #%d field #%d resource source is invalid.', $templateIndex + 1, $fieldIndex + 1);
+                    }
+                }
+
+                if ($fieldKind === 'formula') {
+                    if (!$this->isNonEmptyString($sourceKey) || !in_array((string) $sourceKey, $formulaKeys, true)) {
+                        $errors[] = sprintf('Sheet template #%d field #%d formula source is invalid.', $templateIndex + 1, $fieldIndex + 1);
+                    }
+                }
+
+                $inputType = $field['inputType'] ?? null;
+                if (
+                    $inputType !== null
+                    && (!$this->isNonEmptyString($inputType) || !in_array($inputType, ['text', 'number', 'boolean'], true))
+                ) {
+                    $errors[] = sprintf('Sheet template #%d field #%d input type must be text, number, or boolean.', $templateIndex + 1, $fieldIndex + 1);
+                }
+            }
+        }
+
+        if (count($templateIds) !== count(array_unique($templateIds))) {
+            $errors[] = 'Sheet templates require unique ids.';
+        }
+
+        return $errors;
+    }
+
+    // Нормализуем ключ так же, как в формульном движке, чтобы ссылки совпадали.
+    private function normalizeKey(string $value): string
+    {
+        $normalized = strtolower(trim($value));
+        $normalized = preg_replace('/[^a-z0-9_]/', '_', $normalized) ?? '';
+        $normalized = preg_replace('/_+/', '_', $normalized) ?? '';
+        $normalized = trim($normalized, '_');
+
+        return $normalized !== '' ? $normalized : 'var';
+    }
+
+    // Собираем ключи ресурсов из вкладок системы.
+    private function buildResourceKeysFromTabs(): array
+    {
+        $keys = [];
+        foreach ($this->tabs as $tab) {
+            if (!is_array($tab) || !is_array($tab['resources'] ?? null)) {
+                continue;
+            }
+
+            foreach ($tab['resources'] as $resource) {
+                if (!is_array($resource)) {
+                    continue;
+                }
+
+                $name = $resource['name'] ?? null;
+                if (!$this->isNonEmptyString($name)) {
+                    continue;
+                }
+
+                $keys[] = $this->normalizeKey((string) $name);
+            }
+        }
+
+        return array_values(array_unique($keys));
+    }
+
+    // Собираем ключи формул из имени формулы.
+    private function buildFormulaKeys(): array
+    {
+        $keys = [];
+        foreach ($this->formulas as $index => $formula) {
+            if (!is_array($formula)) {
+                continue;
+            }
+
+            $name = $formula['name'] ?? null;
+            if (!$this->isNonEmptyString($name)) {
+                $name = sprintf('Formula %d', $index + 1);
+            }
+
+            $keys[] = $this->normalizeKey((string) $name);
+        }
+
+        return array_values(array_unique($keys));
     }
 
     private function isNonEmptyString(mixed $value): bool

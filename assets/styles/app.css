@@ -384,6 +384,17 @@ body {
     border-bottom: 1px solid #444;
 }
 
+.token-row-main {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.token-sheet-meta {
+    color: #bdbdbd;
+    font-size: 1.1rem;
+}
+
 .token-thumb {
     width: 32px;
     height: 32px;
@@ -605,6 +616,68 @@ body {
     color: #f5a4a4;
 }
 
+.workshop-sheet-templates {
+    margin-top: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+}
+
+.workshop-sheet-template-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+}
+
+.workshop-sheet-template-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+}
+
+.workshop-sheet-template-header {
+    display: grid;
+    grid-template-columns: 1.4fr 0.8fr auto;
+    gap: 0.6rem;
+    align-items: center;
+}
+
+.workshop-sheet-template-header input,
+.workshop-sheet-template-header select {
+    border: 1px solid #4b4b4b;
+    padding: 0.4rem 0.6rem;
+}
+
+.workshop-sheet-field-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.workshop-sheet-field-row {
+    display: grid;
+    grid-template-columns: 1fr 0.8fr 1fr 1fr 0.8fr auto auto;
+    gap: 0.5rem;
+    align-items: center;
+    padding: 0.6rem;
+    border: 1px solid #3f3f3f;
+    background: #1f1f1f;
+}
+
+.workshop-sheet-field-row input,
+.workshop-sheet-field-row select {
+    border: 1px solid #4b4b4b;
+    padding: 0.4rem 0.6rem;
+}
+
+.workshop-sheet-readonly {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 1.1rem;
+    color: #bdbdbd;
+}
+
 .workshop-autocomplete {
     position: absolute;
     z-index: 1200;
@@ -707,6 +780,70 @@ body {
     font-size: 1.3rem;
 }
 
+.token-template-block {
+    border: 1px solid #4b4b4b;
+    padding: 0.8rem;
+    margin-bottom: 0.8rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.token-template-title {
+    font-size: 1.3rem;
+    text-transform: uppercase;
+    color: #d7d7d7;
+}
+
+.token-template-summary {
+    color: #bdbdbd;
+    font-size: 1.2rem;
+}
+
+.token-template-filter {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.token-template-filter select {
+    border: 1px solid #4b4b4b;
+    padding: 0.4rem 0.6rem;
+}
+
+.token-template-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.token-template-field {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+}
+
+.token-template-label {
+    font-size: 1.2rem;
+}
+
+.token-template-meta {
+    color: #8f8f8f;
+    font-size: 1.1rem;
+}
+
+.token-template-input-wrap input[type='text'],
+.token-template-input-wrap input[type='number'] {
+    border: 1px solid #4b4b4b;
+    padding: 0.4rem 0.6rem;
+    width: 100%;
+}
+
+.token-template-hint {
+    color: #bdbdbd;
+    font-size: 1.2rem;
+}
+
 @media screen and (max-width: 1024px) {
     .workshop-system-layout {
         flex-direction: column;
@@ -722,6 +859,14 @@ body {
     }
 
     .workshop-formula-row {
+        grid-template-columns: 1fr;
+    }
+
+    .workshop-sheet-template-header {
+        grid-template-columns: 1fr;
+    }
+
+    .workshop-sheet-field-row {
         grid-template-columns: 1fr;
     }
 }

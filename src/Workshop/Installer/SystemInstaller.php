@@ -27,6 +27,7 @@ class SystemInstaller
 
         $resources = $this->buildResources($template->getResources(), $tabId);
         $formulas = $this->buildFormulas($template->getFormulas());
+        $sheetTemplates = $this->buildSheetTemplates($template->getSheetTemplates(), $resources, $formulas);
         $tabResources = array_map(
             static fn (array $resource): array => [
                 'id' => $resource['id'],
@@ -52,6 +53,7 @@ class SystemInstaller
             ]])
             ->setResources($resources)
             ->setFormulas($formulas)
+            ->setSheetTemplates($sheetTemplates)
             ->setMeta([]);
 
         $this->dm->persist($system);
@@ -107,6 +109,84 @@ class SystemInstaller
         return $normalized;
     }
 
+    /**
+     * Формируем стартовые шаблоны листов токена для выбранной системы.
+     */
+    private function buildSheetTemplates(array $templates, array $resources, array $formulas): array
+    {
+        $resourceKeys = [];
+        foreach ($resources as $resource) {
+            $resourceKeys[] = $this->normalizeKey((string) ($resource['name'] ?? 'resource'));
+        }
+        $resourceKeys = array_values(array_unique($resourceKeys));
+
+        $formulaKeys = [];
+        foreach ($formulas as $index => $formula) {
+            $name = (string) ($formula['name'] ?? sprintf('Formula %d', $index + 1));
+            $formulaKeys[] = $this->normalizeKey($name);
+        }
+        $formulaKeys = array_values(array_unique($formulaKeys));
+
+        $result = [];
+        foreach ($templates as $templateIndex => $template) {
+            if (!is_array($template)) {
+                continue;
+            }
+
+            $name = trim((string) ($template['name'] ?? sprintf('Template %d', $templateIndex + 1)));
+            $type = (string) ($template['type'] ?? 'character');
+            if (!in_array($type, ['character', 'monster', 'object'], true)) {
+                $type = 'character';
+            }
+
+            $normalizedFields = [];
+            $fields = is_array($template['fields'] ?? null) ? $template['fields'] : [];
+            foreach ($fields as $fieldIndex => $field) {
+                if (!is_array($field)) {
+                    continue;
+                }
+
+                $kind = (string) ($field['kind'] ?? 'local');
+                if (!in_array($kind, ['resource', 'formula', 'local'], true)) {
+                    $kind = 'local';
+                }
+
+                $sourceKey = $this->normalizeKey((string) ($field['sourceKey'] ?? $field['key'] ?? sprintf('field_%d', $fieldIndex + 1)));
+                if ($kind === 'resource' && !in_array($sourceKey, $resourceKeys, true)) {
+                    continue;
+                }
+                if ($kind === 'formula' && !in_array($sourceKey, $formulaKeys, true)) {
+                    continue;
+                }
+
+                $inputType = (string) ($field['inputType'] ?? ($kind === 'formula' ? 'number' : 'text'));
+                if (!in_array($inputType, ['text', 'number', 'boolean'], true)) {
+                    $inputType = 'text';
+                }
+
+                $normalizedFields[] = [
+                    'id' => $this->createId('sheet-field'),
+                    'label' => trim((string) ($field['label'] ?? ucfirst(str_replace('_', ' ', $sourceKey)))) ?: 'Field',
+                    'kind' => $kind,
+                    'sourceKey' => $sourceKey,
+                    'key' => $sourceKey,
+                    'inputType' => $inputType,
+                    'readOnly' => $kind === 'formula',
+                    'order' => $fieldIndex,
+                ];
+            }
+
+            $result[] = [
+                'id' => $this->createId('sheet-template'),
+                'name' => $name !== '' ? $name : sprintf('Template %d', $templateIndex + 1),
+                'type' => $type,
+                'fields' => $normalizedFields,
+            ];
+        }
+
+        return $result;
+    }
+
     private function humanize(string $value): string
     {
         $value = str_replace(['-', '_'], ' ', trim($value));
@@ -121,6 +201,16 @@ class SystemInstaller
         $slug = preg_replace('/[^a-z0-9]+/', '-', $slug) ?? '';
 
         return trim($slug, '-');
+    }
+
+    private function normalizeKey(string $value): string
+    {
+        $normalized = strtolower(trim($value));
+        $normalized = preg_replace('/[^a-z0-9_]/', '_', $normalized) ?? '';
+        $normalized = preg_replace('/_+/', '_', $normalized) ?? '';
+        $normalized = trim($normalized, '_');
+
+        return $normalized !== '' ? $normalized : 'field';
     }
 
     private function createId(string $prefix): string

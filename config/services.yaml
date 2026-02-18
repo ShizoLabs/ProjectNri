@@ -22,6 +22,8 @@ services:
     # this creates a service per class whose id is the fully-qualified class name
     App\:
         resource: '../src/'
+        exclude:
+            - '../src/Repository/'
 
     # Явно передаём в команду все сервисы с тегом app.workshop_template.
     # Это альтернатива атрибуту #[TaggedIterator(...)] в конструкторе.

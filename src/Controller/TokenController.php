@@ -3,9 +3,15 @@
 namespace App\Controller;
 
 use App\Document\Token;
+use App\Document\TokenType;
+use App\Document\WorkshopSystem;
 use App\Form\TokenFormType;
+use App\Service\FormulaEngine;
+use App\Service\SheetTemplateCatalogBuilder;
 use Doctrine\ODM\MongoDB\DocumentManager;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\Form\FormError;
+use Symfony\Component\Form\FormInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -13,40 +19,45 @@ use Symfony\Component\Routing\Attribute\Route;
 
 final class TokenController extends AbstractController
 {
+    public function __construct(
+        private readonly SheetTemplateCatalogBuilder $sheetTemplateCatalogBuilder,
+        private readonly FormulaEngine $formulaEngine,
+    ) {
+    }
+
     #[Route('/token/create', name: 'token_create')]
     public function index(Request $request, DocumentManager $dm): Response
     {
+        $this->ensureDefaultTokenTypes($dm);
+
         $token = new Token();
         $sessionId = $request->query->get('session');
         if (is_string($sessionId) && $sessionId !== '') {
             $token->setSessionId($sessionId);
         }
 
-        $form = $this->createForm(TokenFormType::class, $token);
+        $catalog = $this->buildSystemCatalog($dm);
+        $form = $this->createForm(TokenFormType::class, $token, $this->buildTokenFormOptions($catalog));
         $form->handleRequest($request);
-        
-        if ($form->isSubmitted() && $form->isValid()) {
-            $imageFile = $form->get('imageFile')->getData();
-            if ($imageFile) {
-                $projectDir = $this->getParameter('kernel.project_dir');
-                $uploadDir = $projectDir . '/public/uploads/tokens';
-                if (!is_dir($uploadDir)) {
-                    mkdir($uploadDir, 0775, true);
-                }
 
-                $extension = $imageFile->guessExtension() ?: 'bin';
-                $newFilename = uniqid('token_', true) . '.' . $extension;
-                $imageFile->move($uploadDir, $newFilename);
-                $token->setImagePath('/uploads/tokens/' . $newFilename);
-            }
+        if ($form->isSubmitted()) {
+            $this->applyTemplateValuesFromForm($form, $token, $catalog);
+        }
+
+        if ($form->isSubmitted() && $form->isValid()) {
+            $this->handleTokenImageUpload($form, $token);
 
             $dm->persist($token);
             $dm->flush();
 
             if ($request->isXmlHttpRequest()) {
+                $redirect = is_string($sessionId) && $sessionId !== ''
+                    ? $this->generateUrl('session_open', ['id' => $sessionId])
+                    : $this->generateUrl('session_index');
+
                 return $this->json([
                     'success' => true,
-                    'redirect' => $this->generateUrl('session_open', ['id' => $sessionId]),
+                    'redirect' => $redirect,
                 ]);
             }
 
@@ -56,6 +67,8 @@ final class TokenController extends AbstractController
         return $this->render('token/create.html.twig', [
             'form' => $form->createView(),
             'sessionId' => $sessionId,
+            'tokenTemplateCatalog' => $catalog,
+            'tokenValues' => $token->getValues(),
         ]);
     }
 
@@ -107,6 +120,9 @@ final class TokenController extends AbstractController
         $token->setRotation($template->getRotation());
         $token->setImagePath($template->getImagePath());
         $token->setTokenType($template->getTokenType());
+        $token->setWorkshopSystemId($template->getWorkshopSystemId());
+        $token->setSheetTemplateId($template->getSheetTemplateId());
+        $token->setValues($template->getValues());
 
         $dm->persist($token);
         $dm->flush();
@@ -122,6 +138,9 @@ final class TokenController extends AbstractController
             'sizeY' => $token->getSizeY(),
             'rotation' => $token->getRotation(),
             'imagePath' => $token->getImagePath(),
+            'workshopSystemId' => $token->getWorkshopSystemId(),
+            'sheetTemplateId' => $token->getSheetTemplateId(),
+            'values' => $token->getValues(),
         ]);
     }
 
@@ -160,6 +179,8 @@ final class TokenController extends AbstractController
     #[Route('/token/{id}/edit', name: 'token_edit', methods: ['GET', 'POST'])]
     public function edit(string $id, Request $request, DocumentManager $dm): Response
     {
+        $this->ensureDefaultTokenTypes($dm);
+
         $repo = $dm->getRepository(Token::class);
         $token = $repo->find($id);
         if (!$token) {
@@ -167,26 +188,23 @@ final class TokenController extends AbstractController
         }
 
         $sessionId = $request->query->get('session');
-        $form = $this->createForm(TokenFormType::class, $token);
+        if (!is_string($sessionId) || $sessionId === '') {
+            $sessionId = $token->getSessionId();
+        }
+
+        $catalog = $this->buildSystemCatalog($dm);
+        $form = $this->createForm(TokenFormType::class, $token, $this->buildTokenFormOptions($catalog));
         $form->handleRequest($request);
 
+        if ($form->isSubmitted()) {
+            $this->applyTemplateValuesFromForm($form, $token, $catalog);
+        }
+
         if ($form->isSubmitted() && $form->isValid()) {
-            $imageFile = $form->get('imageFile')->getData();
-            if ($imageFile) {
-                $projectDir = $this->getParameter('kernel.project_dir');
-                $uploadDir = $projectDir . '/public/uploads/tokens';
-                if (!is_dir($uploadDir)) {
-                    mkdir($uploadDir, 0775, true);
-                }
-
-                $extension = $imageFile->guessExtension() ?: 'bin';
-                $newFilename = uniqid('token_', true) . '.' . $extension;
-                $imageFile->move($uploadDir, $newFilename);
-                $token->setImagePath('/uploads/tokens/' . $newFilename);
-            }
-
+            $this->handleTokenImageUpload($form, $token);
             $dm->persist($token);
 
+            // Если правим базовый шаблон токена, синхронизируем все его клоны на карте.
             if ($token->getTemplateId() === null && $token->getMapId() === null) {
                 $clones = $repo->findBy(['templateId' => $token->getId()]);
                 foreach ($clones as $clone) {
@@ -196,26 +214,28 @@ final class TokenController extends AbstractController
                     $clone->setRotation($token->getRotation());
                     $clone->setImagePath($token->getImagePath());
                     $clone->setTokenType($token->getTokenType());
+                    $clone->setWorkshopSystemId($token->getWorkshopSystemId());
+                    $clone->setSheetTemplateId($token->getSheetTemplateId());
+                    $clone->setValues($token->getValues());
                     $dm->persist($clone);
                 }
             }
 
             $dm->flush();
 
-            if (is_string($sessionId) && $sessionId !== '') {
-                return $this->json([
-                    'success' => true,
-                    'redirect' => $this->generateUrl('session_open', ['id' => $sessionId]),
-                ]);
-            }
+            $redirect = is_string($sessionId) && $sessionId !== ''
+                ? $this->generateUrl('session_open', ['id' => $sessionId])
+                : $this->generateUrl('session_index');
 
-            return $this->json(['success' => true, 'redirect' => $this->generateUrl('session_index')]);
+            return $this->json(['success' => true, 'redirect' => $redirect]);
         }
 
         return $this->render('token/edit.html.twig', [
             'form' => $form->createView(),
             'sessionId' => $sessionId,
             'tokenId' => $token->getId(),
+            'tokenTemplateCatalog' => $catalog,
+            'tokenValues' => $token->getValues(),
         ]);
     }
 
@@ -248,6 +268,20 @@ final class TokenController extends AbstractController
         if (array_key_exists('imagePath', $data)) {
             $token->setImagePath(is_string($data['imagePath']) ? $data['imagePath'] : null);
         }
+        if (array_key_exists('workshopSystemId', $data)) {
+            $token->setWorkshopSystemId(is_string($data['workshopSystemId']) && $data['workshopSystemId'] !== '' ? $data['workshopSystemId'] : null);
+        }
+        if (array_key_exists('sheetTemplateId', $data)) {
+            $token->setSheetTemplateId(is_string($data['sheetTemplateId']) && $data['sheetTemplateId'] !== '' ? $data['sheetTemplateId'] : null);
+        }
+
+        if (array_key_exists('values', $data) && is_array($data['values'])) {
+            $catalog = $this->buildSystemCatalog($dm);
+            $templateError = $this->hydrateTokenValuesFromTemplate($token, $catalog, $data['values']);
+            if ($templateError !== null) {
+                return $this->json(['error' => $templateError], 400);
+            }
+        }
 
         $dm->persist($token);
 
@@ -260,6 +294,9 @@ final class TokenController extends AbstractController
                 $clone->setRotation($token->getRotation());
                 $clone->setImagePath($token->getImagePath());
                 $clone->setTokenType($token->getTokenType());
+                $clone->setWorkshopSystemId($token->getWorkshopSystemId());
+                $clone->setSheetTemplateId($token->getSheetTemplateId());
+                $clone->setValues($token->getValues());
                 $dm->persist($clone);
             }
         }
@@ -267,5 +304,210 @@ final class TokenController extends AbstractController
         $dm->flush();
 
         return $this->json(['ok' => true]);
+    }
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    private function buildSystemCatalog(DocumentManager $dm): array
+    {
+        $systems = $dm->getRepository(WorkshopSystem::class)->findAll();
+
+        return $this->sheetTemplateCatalogBuilder->buildCatalog($systems);
+    }
+
+    /**
+     * @param array<string, array<string, mixed>> $catalog
+     */
+    private function buildTokenFormOptions(array $catalog): array
+    {
+        $templateChoiceData = $this->sheetTemplateCatalogBuilder->buildTemplateChoices($catalog);
+
+        return [
+            'workshop_system_choices' => $this->sheetTemplateCatalogBuilder->buildSystemChoices($catalog),
+            'sheet_template_choices' => $templateChoiceData['choices'],
+            'sheet_template_choice_attr' => $templateChoiceData['attrs'],
+        ];
+    }
+
+    /**
+     * Применяем к токену значения из выбранного шаблона листа.
+     */
+    private function applyTemplateValuesFromForm(FormInterface $form, Token $token, array $catalog): void
+    {
+        $valuesPayload = $form->get('valuesJson')->getData();
+        $values = $this->decodeValuesPayload($valuesPayload);
+        if ($values === null) {
+            $form->addError(new FormError('Template values payload must be valid JSON object.'));
+            return;
+        }
+
+        $templateError = $this->hydrateTokenValuesFromTemplate($token, $catalog, $values);
+        if ($templateError !== null) {
+            $form->addError(new FormError($templateError));
+        }
+    }
+
+    /**
+     * @param array<string, array<string, mixed>> $catalog
+     * @param array<string, mixed> $rawValues
+     */
+    private function hydrateTokenValuesFromTemplate(Token $token, array $catalog, array $rawValues): ?string
+    {
+        $systemId = $token->getWorkshopSystemId();
+        $templateId = $token->getSheetTemplateId();
+
+        if (($systemId === null || $systemId === '') && ($templateId === null || $templateId === '')) {
+            $token->setValues([]);
+            return null;
+        }
+
+        if ($systemId === null || $systemId === '' || $templateId === null || $templateId === '') {
+            return 'Choose both workshop system and sheet template.';
+        }
+
+        $system = $catalog[$systemId] ?? null;
+        if (!is_array($system)) {
+            return 'Selected workshop system was not found.';
+        }
+
+        $template = $this->sheetTemplateCatalogBuilder->findSheetTemplate($catalog, $systemId, $templateId);
+        if (!is_array($template)) {
+            return 'Selected sheet template does not belong to selected workshop system.';
+        }
+
+        $editableValues = $this->sheetTemplateCatalogBuilder->normalizeEditableValues($template, $rawValues);
+
+        $templateFields = is_array($template['fields'] ?? null) ? $template['fields'] : [];
+        $hasFormulaFields = false;
+        foreach ($templateFields as $templateField) {
+            if (is_array($templateField) && (($templateField['kind'] ?? null) === 'formula')) {
+                $hasFormulaFields = true;
+                break;
+            }
+        }
+
+        $computedValues = $editableValues;
+        $formulas = is_array($system['formulas'] ?? null) ? $system['formulas'] : [];
+        if ($hasFormulaFields && !empty($formulas)) {
+            $resourceDefaults = [];
+            $resources = is_array($system['resources'] ?? null) ? $system['resources'] : [];
+            foreach ($resources as $resource) {
+                if (!is_array($resource)) {
+                    continue;
+                }
+
+                $key = is_string($resource['key'] ?? null) ? $resource['key'] : null;
+                if ($key === null || $key === '') {
+                    continue;
+                }
+
+                $type = is_string($resource['type'] ?? null) ? $resource['type'] : 'text';
+                $resourceDefaults[$key] = match ($type) {
+                    'number' => 0,
+                    'boolean' => false,
+                    default => '',
+                };
+            }
+
+            try {
+                $computedValues = $this->formulaEngine->computeAll(
+                    array_merge($resourceDefaults, $editableValues),
+                    $formulas
+                );
+            } catch (\Throwable $exception) {
+                return 'Cannot compute formula values for selected sheet template.';
+            }
+        }
+
+        $finalValues = $this->sheetTemplateCatalogBuilder->injectFormulaValues($template, $computedValues, $editableValues);
+        $token->setValues($finalValues);
+
+        return null;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function decodeValuesPayload(mixed $payload): ?array
+    {
+        if ($payload === null || $payload === '') {
+            return [];
+        }
+
+        if (!is_string($payload)) {
+            return null;
+        }
+
+        $decoded = json_decode($payload, true);
+        if (!is_array($decoded)) {
+            return null;
+        }
+
+        return $decoded;
+    }
+
+    /**
+     * Отдельный метод, чтобы не дублировать загрузку картинки между create/edit.
+     */
+    private function handleTokenImageUpload(FormInterface $form, Token $token): void
+    {
+        $imageFile = $form->get('imageFile')->getData();
+        if ($imageFile === null) {
+            return;
+        }
+
+        $projectDir = $this->getParameter('kernel.project_dir');
+        $uploadDir = $projectDir . '/public/uploads/tokens';
+        if (!is_dir($uploadDir)) {
+            mkdir($uploadDir, 0775, true);
+        }
+
+        $extension = $imageFile->guessExtension() ?: 'bin';
+        $newFilename = uniqid('token_', true) . '.' . $extension;
+        $imageFile->move($uploadDir, $newFilename);
+        $token->setImagePath('/uploads/tokens/' . $newFilename);
+    }
+
+    /**
+     * Добавляем базовые типы токена, чтобы селект tokenType всегда был доступен в форме.
+     */
+    private function ensureDefaultTokenTypes(DocumentManager $dm): void
+    {
+        $existing = $dm->getRepository(TokenType::class)->findAll();
+        $existingNames = [];
+
+        foreach ($existing as $tokenType) {
+            if (!$tokenType instanceof TokenType) {
+                continue;
+            }
+
+            $name = strtolower(trim($tokenType->getName()));
+            if ($name !== '') {
+                $existingNames[$name] = true;
+            }
+        }
+
+        $defaults = [
+            'character' => 'Character',
+            'monster' => 'Monster',
+            'object' => 'Object',
+        ];
+
+        $created = false;
+        foreach ($defaults as $key => $label) {
+            if (isset($existingNames[$key])) {
+                continue;
+            }
+
+            $tokenType = new TokenType();
+            $tokenType->setName($label);
+            $dm->persist($tokenType);
+            $created = true;
+        }
+
+        if ($created) {
+            $dm->flush();
+        }
     }
 }

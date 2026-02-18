@@ -34,6 +34,7 @@ class WorkshopSystemType extends AbstractType
         $this->addJsonField($builder, 'resources');
         $this->addJsonField($builder, 'tabs');
         $this->addJsonField($builder, 'formulas');
+        $this->addJsonField($builder, 'sheetTemplates');
         $this->addJsonField($builder, 'meta');
     }
 

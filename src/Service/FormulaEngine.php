@@ -2,7 +2,7 @@
 
 namespace App\Service;
 
-use App\Repository\TokenRepository;
+use App\Document\Token;
 use Doctrine\ODM\MongoDB\DocumentManager;
 use Symfony\Component\ExpressionLanguage\ExpressionFunction;
 use Symfony\Component\ExpressionLanguage\ExpressionLanguage;
@@ -29,7 +29,6 @@ final class FormulaEngine
 
     public function __construct(
         private readonly DocumentManager $dm,
-        private readonly TokenRepository $tokenRepository,
         ?ExpressionLanguage $expressionLanguage = null
     ) {
         $this->expressionLanguage = $expressionLanguage ?? new ExpressionLanguage();
@@ -131,7 +130,8 @@ final class FormulaEngine
             ? $this->computeAll($tokenValues, $formulas)
             : $this->recomputeAffected($tokenValues, $formulas, $changedKeys);
 
-        $token = $this->tokenRepository->find($tokenId);
+        // Репозиторий берём через ODM, а не через DI, чтобы не автосвязывать DocumentRepository как сервис.
+        $token = $this->dm->getRepository(Token::class)->find($tokenId);
         if ($token === null) {
             throw new \RuntimeException('Token not found.');
         }

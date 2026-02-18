@@ -42,6 +42,12 @@ class Token
     #[ODM\Field(type: 'string')]
     private ?string $templateId = null;
 
+    #[ODM\Field(type: 'string')]
+    private ?string $workshopSystemId = null;
+
+    #[ODM\Field(type: 'string')]
+    private ?string $sheetTemplateId = null;
+
     #[ODM\Field(type: 'hash')]
     private array $values = [];
 
@@ -166,6 +172,28 @@ class Token
     public function setTemplateId(?string $templateId): self
     {
         $this->templateId = $templateId;
+        return $this;
+    }
+
+    public function getWorkshopSystemId(): ?string
+    {
+        return $this->workshopSystemId;
+    }
+
+    public function setWorkshopSystemId(?string $workshopSystemId): self
+    {
+        $this->workshopSystemId = $workshopSystemId;
+        return $this;
+    }
+
+    public function getSheetTemplateId(): ?string
+    {
+        return $this->sheetTemplateId;
+    }
+
+    public function setSheetTemplateId(?string $sheetTemplateId): self
+    {
+        $this->sheetTemplateId = $sheetTemplateId;
         return $this;
     }
 

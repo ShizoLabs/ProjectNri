@@ -36,6 +36,7 @@ if (root) {
         settings: payload.settings ?? {},
         tabs,
         formulas: normalizeFormulas(payload.formulas),
+        sheetTemplates: normalizeSheetTemplates(payload.sheetTemplates),
         meta: payload.meta ?? {},
     };
 
@@ -46,6 +47,7 @@ if (root) {
 
     // Идентификатор активной вкладки и временное состояние drag-and-drop ресурсов.
     let activeTabId = state.tabs[0]?.id ?? null;
+    let activeSheetTemplateId = state.sheetTemplates[0]?.id ?? null;
     let dragState = null;
 
     // Состояние всплывающего автокомплита формул.
@@ -165,6 +167,47 @@ if (root) {
         });
     }
 
+    // Нормализация шаблонов листов токена.
+    function normalizeSheetTemplates(list) {
+        if (!Array.isArray(list)) {
+            return [];
+        }
+
+        return list.map((template, index) => {
+            const safe = isPlainObject(template) ? { ...template } : {};
+            if (!isNonEmptyString(safe.id)) {
+                safe.id = createId('sheet-template');
+            }
+
+            safe.name = isNonEmptyString(safe.name) ? safe.name : `Template ${index + 1}`;
+            safe.type = ['character', 'monster', 'object'].includes(safe.type) ? safe.type : 'character';
+            safe.fields = Array.isArray(safe.fields) ? safe.fields : [];
+            safe.fields = safe.fields
+                .map((field, fieldIndex) => normalizeSheetTemplateField(field, fieldIndex))
+                .sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
+
+            return safe;
+        });
+    }
+
+    // Нормализация поля шаблона листа.
+    function normalizeSheetTemplateField(field, fieldIndex) {
+        const safe = isPlainObject(field) ? { ...field } : {};
+        if (!isNonEmptyString(safe.id)) {
+            safe.id = createId('sheet-field');
+        }
+
+        safe.label = isNonEmptyString(safe.label) ? safe.label : `Field ${fieldIndex + 1}`;
+        safe.kind = ['resource', 'formula', 'local'].includes(safe.kind) ? safe.kind : 'local';
+        safe.sourceKey = isNonEmptyString(safe.sourceKey) ? normalizeVariableName(safe.sourceKey) : normalizeVariableName(safe.label);
+        safe.key = isNonEmptyString(safe.key) ? normalizeVariableName(safe.key) : safe.sourceKey;
+        safe.inputType = ['text', 'number', 'boolean'].includes(safe.inputType) ? safe.inputType : 'text';
+        safe.readOnly = Boolean(safe.readOnly) || safe.kind === 'formula';
+        safe.order = isNumeric(safe.order) ? Number(safe.order) : fieldIndex;
+
+        return safe;
+    }
+
     // Вспомогательные проверки типов.
     function isPlainObject(value) {
         return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -242,11 +285,22 @@ if (root) {
         return state.tabs.find((tab) => tab.id === activeTabId) ?? null;
     }
 
+    // Текущий активный шаблон листа токена.
+    function getActiveSheetTemplate() {
+        return state.sheetTemplates.find((template) => template.id === activeSheetTemplateId) ?? null;
+    }
+
     // Переключение активной вкладки с перерисовкой UI вкладок.
     function setActiveTab(tabId) {
         activeTabId = tabId;
         renderTabsBar();
         renderTabPanel();
+    }
+
+    // Переключение активного шаблона листа.
+    function setActiveSheetTemplate(templateId) {
+        activeSheetTemplateId = templateId;
+        renderSheetTemplatesPanel();
     }
 
     // Синхронизация состояния конструктора в скрытые поля формы (JSON).
@@ -263,6 +317,9 @@ if (root) {
         if (fields.formulas) {
             fields.formulas.value = JSON.stringify(state.formulas ?? []);
         }
+        if (fields.sheetTemplates) {
+            fields.sheetTemplates.value = JSON.stringify(state.sheetTemplates ?? []);
+        }
         if (fields.meta) {
             fields.meta.value = JSON.stringify(state.meta ?? {});
         }
@@ -274,6 +331,7 @@ if (root) {
         renderTabsBar();
         renderTabPanel();
         renderFormulasPanel();
+        renderSheetTemplatesPanel();
         updateValidationUI();
         updatePreviewUI();
         syncFields();
@@ -530,6 +588,237 @@ if (root) {
 
             panel.appendChild(row);
         });
+    }
+
+    // Рендер конструктора шаблонов листов токена.
+    function renderSheetTemplatesPanel() {
+        const listNode = root.querySelector('[data-sheet-template-list]');
+        const editorNode = root.querySelector('[data-sheet-template-editor]');
+        if (!listNode || !editorNode) {
+            return;
+        }
+
+        listNode.innerHTML = '';
+        editorNode.innerHTML = '';
+
+        if (state.sheetTemplates.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'workshop-empty';
+            empty.textContent = 'No sheet templates yet.';
+            listNode.appendChild(empty);
+            return;
+        }
+
+        if (!state.sheetTemplates.find((template) => template.id === activeSheetTemplateId)) {
+            activeSheetTemplateId = state.sheetTemplates[0]?.id ?? null;
+        }
+
+        state.sheetTemplates.forEach((template) => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = `workshop-tab-btn${template.id === activeSheetTemplateId ? ' active' : ''}`;
+            btn.dataset.action = 'select-sheet-template';
+            btn.dataset.sheetTemplateId = template.id;
+            btn.textContent = `${template.name} (${template.type})`;
+            listNode.appendChild(btn);
+        });
+
+        const template = getActiveSheetTemplate();
+        if (!template) {
+            return;
+        }
+
+        const header = document.createElement('div');
+        header.className = 'workshop-sheet-template-header';
+
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.value = template.name;
+        nameInput.dataset.field = 'sheet-template-name';
+        nameInput.dataset.sheetTemplateId = template.id;
+        nameInput.placeholder = 'Template name';
+        if (!editable) {
+            nameInput.disabled = true;
+        }
+
+        const typeSelect = document.createElement('select');
+        typeSelect.dataset.field = 'sheet-template-type';
+        typeSelect.dataset.sheetTemplateId = template.id;
+        if (!editable) {
+            typeSelect.disabled = true;
+        }
+
+        ['character', 'monster', 'object'].forEach((type) => {
+            const option = document.createElement('option');
+            option.value = type;
+            option.textContent = type;
+            if (template.type === type) {
+                option.selected = true;
+            }
+            typeSelect.appendChild(option);
+        });
+
+        header.appendChild(nameInput);
+        header.appendChild(typeSelect);
+
+        if (editable) {
+            const removeTemplateBtn = document.createElement('button');
+            removeTemplateBtn.type = 'button';
+            removeTemplateBtn.className = 'workshop-inline-btn';
+            removeTemplateBtn.dataset.action = 'remove-sheet-template';
+            removeTemplateBtn.dataset.sheetTemplateId = template.id;
+            removeTemplateBtn.textContent = 'Remove template';
+            header.appendChild(removeTemplateBtn);
+        }
+
+        editorNode.appendChild(header);
+
+        const fields = Array.isArray(template.fields) ? template.fields : [];
+        if (fields.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'workshop-empty';
+            empty.textContent = 'No fields in this template.';
+            editorNode.appendChild(empty);
+            return;
+        }
+
+        const fieldsNode = document.createElement('div');
+        fieldsNode.className = 'workshop-sheet-field-list';
+
+        fields
+            .slice()
+            .sort((left, right) => (left.order ?? 0) - (right.order ?? 0))
+            .forEach((field) => {
+                const row = document.createElement('div');
+                row.className = 'workshop-sheet-field-row';
+                row.dataset.sheetFieldId = field.id;
+                row.dataset.sheetTemplateId = template.id;
+
+                const labelInput = document.createElement('input');
+                labelInput.type = 'text';
+                labelInput.value = field.label ?? '';
+                labelInput.dataset.field = 'sheet-field-label';
+                labelInput.dataset.sheetTemplateId = template.id;
+                labelInput.dataset.sheetFieldId = field.id;
+                labelInput.placeholder = 'Label';
+                if (!editable) {
+                    labelInput.disabled = true;
+                }
+
+                const kindSelect = document.createElement('select');
+                kindSelect.dataset.field = 'sheet-field-kind';
+                kindSelect.dataset.sheetTemplateId = template.id;
+                kindSelect.dataset.sheetFieldId = field.id;
+                if (!editable) {
+                    kindSelect.disabled = true;
+                }
+                ['resource', 'formula', 'local'].forEach((kind) => {
+                    const option = document.createElement('option');
+                    option.value = kind;
+                    option.textContent = kind;
+                    if ((field.kind ?? 'local') === kind) {
+                        option.selected = true;
+                    }
+                    kindSelect.appendChild(option);
+                });
+
+                let sourceControl;
+                if (field.kind === 'local') {
+                    sourceControl = document.createElement('input');
+                    sourceControl.type = 'text';
+                    sourceControl.value = field.sourceKey ?? '';
+                } else {
+                    sourceControl = document.createElement('select');
+                    const list = field.kind === 'resource' ? getAllResources() : getAllFormulaReferences();
+                    list.forEach((entry) => {
+                        const option = document.createElement('option');
+                        option.value = entry.key;
+                        option.textContent = `${entry.name} (${entry.key})`;
+                        if (entry.key === field.sourceKey) {
+                            option.selected = true;
+                        }
+                        sourceControl.appendChild(option);
+                    });
+                    if (list.length === 0) {
+                        const option = document.createElement('option');
+                        option.value = '';
+                        option.textContent = 'No options';
+                        sourceControl.appendChild(option);
+                    }
+                }
+                sourceControl.dataset.field = 'sheet-field-source';
+                sourceControl.dataset.sheetTemplateId = template.id;
+                sourceControl.dataset.sheetFieldId = field.id;
+                if (!editable) {
+                    sourceControl.disabled = true;
+                }
+
+                const keyInput = document.createElement('input');
+                keyInput.type = 'text';
+                keyInput.value = field.key ?? '';
+                keyInput.dataset.field = 'sheet-field-key';
+                keyInput.dataset.sheetTemplateId = template.id;
+                keyInput.dataset.sheetFieldId = field.id;
+                keyInput.placeholder = 'Stored key';
+                if (!editable) {
+                    keyInput.disabled = true;
+                }
+
+                const inputTypeSelect = document.createElement('select');
+                inputTypeSelect.dataset.field = 'sheet-field-input-type';
+                inputTypeSelect.dataset.sheetTemplateId = template.id;
+                inputTypeSelect.dataset.sheetFieldId = field.id;
+                if (!editable) {
+                    inputTypeSelect.disabled = true;
+                }
+                ['text', 'number', 'boolean'].forEach((inputType) => {
+                    const option = document.createElement('option');
+                    option.value = inputType;
+                    option.textContent = inputType;
+                    if ((field.inputType ?? 'text') === inputType) {
+                        option.selected = true;
+                    }
+                    inputTypeSelect.appendChild(option);
+                });
+
+                const readOnlyWrap = document.createElement('label');
+                readOnlyWrap.className = 'workshop-sheet-readonly';
+                const readOnlyCheckbox = document.createElement('input');
+                readOnlyCheckbox.type = 'checkbox';
+                readOnlyCheckbox.checked = Boolean(field.readOnly);
+                readOnlyCheckbox.dataset.field = 'sheet-field-readonly';
+                readOnlyCheckbox.dataset.sheetTemplateId = template.id;
+                readOnlyCheckbox.dataset.sheetFieldId = field.id;
+                if (!editable || field.kind === 'formula') {
+                    readOnlyCheckbox.disabled = true;
+                }
+                const readOnlyText = document.createElement('span');
+                readOnlyText.textContent = 'read only';
+                readOnlyWrap.appendChild(readOnlyCheckbox);
+                readOnlyWrap.appendChild(readOnlyText);
+
+                row.appendChild(labelInput);
+                row.appendChild(kindSelect);
+                row.appendChild(sourceControl);
+                row.appendChild(keyInput);
+                row.appendChild(inputTypeSelect);
+                row.appendChild(readOnlyWrap);
+
+                if (editable) {
+                    const removeFieldBtn = document.createElement('button');
+                    removeFieldBtn.type = 'button';
+                    removeFieldBtn.className = 'workshop-inline-btn';
+                    removeFieldBtn.dataset.action = 'remove-sheet-field';
+                    removeFieldBtn.dataset.sheetTemplateId = template.id;
+                    removeFieldBtn.dataset.sheetFieldId = field.id;
+                    removeFieldBtn.textContent = 'Remove';
+                    row.appendChild(removeFieldBtn);
+                }
+
+                fieldsNode.appendChild(row);
+            });
+
+        editorNode.appendChild(fieldsNode);
     }
 
     // Полная валидация всех формул:
@@ -792,6 +1081,21 @@ if (root) {
                     });
                 }
             });
+        });
+        return [...unique.values()];
+    }
+
+    // Собираем список доступных ключей формул.
+    function getAllFormulaReferences() {
+        const unique = new Map();
+        state.formulas.forEach((formula, index) => {
+            const key = normalizeVariableName(formula.name || `formula_${index + 1}`);
+            if (!unique.has(key)) {
+                unique.set(key, {
+                    name: formula.name || key,
+                    key,
+                });
+            }
         });
         return [...unique.values()];
     }
@@ -1128,6 +1432,64 @@ if (root) {
         }
     }
 
+    function getSheetTemplateById(templateId) {
+        return state.sheetTemplates.find((template) => template.id === templateId) ?? null;
+    }
+
+    function getSheetFieldById(template, fieldId) {
+        return (template?.fields ?? []).find((field) => field.id === fieldId) ?? null;
+    }
+
+    function reindexSheetTemplateFields(template) {
+        if (!template || !Array.isArray(template.fields)) {
+            return;
+        }
+
+        template.fields
+            .sort((left, right) => (left.order ?? 0) - (right.order ?? 0))
+            .forEach((field, index) => {
+                field.order = index;
+            });
+    }
+
+    function createSheetTemplate(name = null, type = 'character') {
+        return {
+            id: createId('sheet-template'),
+            name: isNonEmptyString(name) ? name : `Template ${state.sheetTemplates.length + 1}`,
+            type: ['character', 'monster', 'object'].includes(type) ? type : 'character',
+            fields: [],
+        };
+    }
+
+    function createSheetTemplateField(kind = 'local') {
+        const resources = getAllResources();
+        const formulas = getAllFormulaReferences();
+        let sourceKey = 'field';
+        let inputType = 'text';
+
+        if (kind === 'resource') {
+            sourceKey = resources[0]?.key ?? 'resource';
+            inputType = resources[0]?.type === 'number' ? 'number' : (resources[0]?.type === 'boolean' ? 'boolean' : 'text');
+        } else if (kind === 'formula') {
+            sourceKey = formulas[0]?.key ?? 'formula';
+            inputType = 'number';
+        } else {
+            sourceKey = `field_${Date.now()}`;
+            inputType = 'text';
+        }
+
+        return {
+            id: createId('sheet-field'),
+            label: kind === 'formula' ? 'Formula field' : (kind === 'resource' ? 'Resource field' : 'Local field'),
+            kind,
+            sourceKey,
+            key: sourceKey,
+            inputType,
+            readOnly: kind === 'formula',
+            order: 0,
+        };
+    }
+
     // Универсальный обработчик изменений всех управляемых полей конструктора.
     function handleFieldInput(event) {
         if (!editable) {
@@ -1204,6 +1566,102 @@ if (root) {
             updatePreviewUI();
             syncFields();
             onFormulaExpressionInput(event.target);
+            return;
+        }
+
+        if (field === 'sheet-template-name') {
+            const template = getSheetTemplateById(event.target.dataset.sheetTemplateId);
+            if (template) {
+                template.name = event.target.value;
+            }
+            renderSheetTemplatesPanel();
+            syncFields();
+            return;
+        }
+
+        if (field === 'sheet-template-type') {
+            const template = getSheetTemplateById(event.target.dataset.sheetTemplateId);
+            if (template) {
+                template.type = ['character', 'monster', 'object'].includes(event.target.value) ? event.target.value : 'character';
+            }
+            renderSheetTemplatesPanel();
+            syncFields();
+            return;
+        }
+
+        if (field === 'sheet-field-label') {
+            const template = getSheetTemplateById(event.target.dataset.sheetTemplateId);
+            const sheetField = getSheetFieldById(template, event.target.dataset.sheetFieldId);
+            if (sheetField) {
+                sheetField.label = event.target.value;
+            }
+            syncFields();
+            return;
+        }
+
+        if (field === 'sheet-field-kind') {
+            const template = getSheetTemplateById(event.target.dataset.sheetTemplateId);
+            const sheetField = getSheetFieldById(template, event.target.dataset.sheetFieldId);
+            if (sheetField) {
+                sheetField.kind = ['resource', 'formula', 'local'].includes(event.target.value) ? event.target.value : 'local';
+                if (sheetField.kind === 'resource') {
+                    sheetField.sourceKey = getAllResources()[0]?.key ?? 'resource';
+                    sheetField.readOnly = false;
+                } else if (sheetField.kind === 'formula') {
+                    sheetField.sourceKey = getAllFormulaReferences()[0]?.key ?? 'formula';
+                    sheetField.readOnly = true;
+                    sheetField.inputType = 'number';
+                } else {
+                    sheetField.sourceKey = sheetField.key || normalizeVariableName(sheetField.label || 'field');
+                    sheetField.readOnly = false;
+                }
+            }
+            renderSheetTemplatesPanel();
+            syncFields();
+            return;
+        }
+
+        if (field === 'sheet-field-source') {
+            const template = getSheetTemplateById(event.target.dataset.sheetTemplateId);
+            const sheetField = getSheetFieldById(template, event.target.dataset.sheetFieldId);
+            if (sheetField) {
+                sheetField.sourceKey = event.target.value ? normalizeVariableName(event.target.value) : '';
+                if (!isNonEmptyString(sheetField.key)) {
+                    sheetField.key = sheetField.sourceKey;
+                }
+            }
+            syncFields();
+            return;
+        }
+
+        if (field === 'sheet-field-key') {
+            const template = getSheetTemplateById(event.target.dataset.sheetTemplateId);
+            const sheetField = getSheetFieldById(template, event.target.dataset.sheetFieldId);
+            if (sheetField) {
+                sheetField.key = normalizeVariableName(event.target.value);
+            }
+            syncFields();
+            return;
+        }
+
+        if (field === 'sheet-field-input-type') {
+            const template = getSheetTemplateById(event.target.dataset.sheetTemplateId);
+            const sheetField = getSheetFieldById(template, event.target.dataset.sheetFieldId);
+            if (sheetField) {
+                sheetField.inputType = ['text', 'number', 'boolean'].includes(event.target.value) ? event.target.value : 'text';
+            }
+            renderSheetTemplatesPanel();
+            syncFields();
+            return;
+        }
+
+        if (field === 'sheet-field-readonly') {
+            const template = getSheetTemplateById(event.target.dataset.sheetTemplateId);
+            const sheetField = getSheetFieldById(template, event.target.dataset.sheetFieldId);
+            if (sheetField) {
+                sheetField.readOnly = event.target.checked || sheetField.kind === 'formula';
+            }
+            syncFields();
         }
     }
 
@@ -1215,12 +1673,17 @@ if (root) {
         }
 
         const action = actionEl.dataset.action;
-        if (!editable && action !== 'select-tab') {
+        if (!editable && action !== 'select-tab' && action !== 'select-sheet-template') {
             return;
         }
 
         if (action === 'select-tab') {
             setActiveTab(actionEl.dataset.tabId);
+            return;
+        }
+
+        if (action === 'select-sheet-template') {
+            setActiveSheetTemplate(actionEl.dataset.sheetTemplateId);
             return;
         }
 
@@ -1295,6 +1758,54 @@ if (root) {
             const formulaId = actionEl.dataset.formulaId;
             state.formulas = state.formulas.filter((formula) => formula.id !== formulaId);
             formulaPreviewById.delete(formulaId);
+            render();
+            return;
+        }
+
+        if (action === 'add-sheet-template') {
+            const template = createSheetTemplate();
+            state.sheetTemplates.push(template);
+            activeSheetTemplateId = template.id;
+            render();
+            return;
+        }
+
+        if (action === 'remove-sheet-template') {
+            const templateId = actionEl.dataset.sheetTemplateId;
+            state.sheetTemplates = state.sheetTemplates.filter((template) => template.id !== templateId);
+            if (activeSheetTemplateId === templateId) {
+                activeSheetTemplateId = state.sheetTemplates[0]?.id ?? null;
+            }
+            render();
+            return;
+        }
+
+        if (action === 'add-sheet-resource-field' || action === 'add-sheet-formula-field' || action === 'add-sheet-local-field') {
+            let template = getActiveSheetTemplate();
+            if (!template) {
+                template = createSheetTemplate();
+                state.sheetTemplates.push(template);
+                activeSheetTemplateId = template.id;
+            }
+
+            const fieldKind = action === 'add-sheet-formula-field'
+                ? 'formula'
+                : (action === 'add-sheet-resource-field' ? 'resource' : 'local');
+
+            const field = createSheetTemplateField(fieldKind);
+            field.order = (template.fields ?? []).length;
+            template.fields = [...(template.fields ?? []), field];
+            reindexSheetTemplateFields(template);
+            render();
+            return;
+        }
+
+        if (action === 'remove-sheet-field') {
+            const template = getSheetTemplateById(actionEl.dataset.sheetTemplateId);
+            if (template) {
+                template.fields = (template.fields ?? []).filter((field) => field.id !== actionEl.dataset.sheetFieldId);
+                reindexSheetTemplateFields(template);
+            }
             render();
             return;
         }

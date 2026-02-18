@@ -5,7 +5,9 @@ namespace App\Controller;
 use App\Document\Session;
 use App\Document\Token;
 use App\Document\Map;
+use App\Document\WorkshopSystem;
 use App\Form\SessionType;
+use App\Service\SheetTemplateCatalogBuilder;
 use Doctrine\ODM\MongoDB\DocumentManager;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
@@ -14,6 +16,11 @@ use Symfony\Component\Routing\Attribute\Route;
 
 final class SessionController extends AbstractController
 {
+    public function __construct(
+        private readonly SheetTemplateCatalogBuilder $sheetTemplateCatalogBuilder,
+    ) {
+    }
+
     /** Session menu */
     #[Route('/session', name: 'session_index')]
     public function index(DocumentManager $dm): Response 
@@ -69,6 +76,9 @@ final class SessionController extends AbstractController
         $sessionId = $session->getId();
         $tokens = $dm->getRepository(Token::class)->findBy(['sessionId' => $sessionId]);
         $maps = $dm->getRepository(Map::class)->findBy(['sessionId' => $sessionId]);
+        $sheetCatalog = $this->sheetTemplateCatalogBuilder->buildCatalog(
+            $dm->getRepository(WorkshopSystem::class)->findAll()
+        );
 
         $mapIdParam = $request->query->get('map');
         $map = null;
@@ -101,7 +111,19 @@ final class SessionController extends AbstractController
                 ];
             }
             if ($sessionToken->getMapId() === null && $sessionToken->getTemplateId() === null) {
-                $templateTokens[] = $sessionToken;
+                $sheetTemplate = $this->sheetTemplateCatalogBuilder->findSheetTemplate(
+                    $sheetCatalog,
+                    $sessionToken->getWorkshopSystemId(),
+                    $sessionToken->getSheetTemplateId()
+                );
+
+                $templateTokens[] = [
+                    'id' => $sessionToken->getId(),
+                    'name' => $sessionToken->getName(),
+                    'imagePath' => $sessionToken->getImagePath(),
+                    'sheetTemplateName' => is_array($sheetTemplate) ? ($sheetTemplate['name'] ?? null) : null,
+                    'sheetTemplateType' => is_array($sheetTemplate) ? ($sheetTemplate['type'] ?? null) : null,
+                ];
             }
         }
 
