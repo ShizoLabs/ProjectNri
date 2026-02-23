@@ -3,7 +3,6 @@
 namespace App\Form;
 
 use App\Document\Token;
-use App\Document\TokenType;
 use Symfony\Component\Form\AbstractType;
 use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
 use Symfony\Component\Form\Extension\Core\Type\FileType;
@@ -13,7 +12,6 @@ use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Form\FormBuilderInterface;
 use Symfony\Component\OptionsResolver\OptionsResolver;
 use Symfony\Component\Validator\Constraints\Image as ImageConstraint;
-use Doctrine\Bundle\MongoDBBundle\Form\Type\DocumentType;
 
 class TokenFormType extends AbstractType
 {
@@ -67,13 +65,6 @@ class TokenFormType extends AbstractType
                     return $options['sheet_template_choice_attr'][$valueKey] ?? [];
                 },
                 'label' => 'Sheet template',
-            ])
-            ->add('tokenType', DocumentType::class, [
-                'required' => false,
-                'class' => TokenType::class,
-                'choice_label' => 'name',
-                'placeholder' => 'No type',
-                'label' => 'Token type',
             ])
             ->add('valuesJson', HiddenType::class, [
                 'required' => false,
