@@ -107,7 +107,6 @@ function initTokenBuilder(form) {
                 templateName: typeof template.name === 'string' && template.name.trim() !== ''
                     ? template.name.trim()
                     : template.id,
-                type: typeof template.type === 'string' ? template.type : 'character',
             });
         });
     });
@@ -197,7 +196,6 @@ function initTokenBuilder(form) {
 
         option.dataset.templateId = meta.templateId;
         option.dataset.systemId = meta.systemId;
-        option.dataset.templateType = meta.type;
     };
 
     const getSelectedTemplateOption = () => templateSelect.selectedOptions[0] ?? null;
@@ -398,7 +396,7 @@ function initTokenBuilder(form) {
             .sort((left, right) => left.order - right.order);
 
         if (summaryContainer) {
-            summaryContainer.textContent = `${template.name} (${template.type})`;
+            summaryContainer.textContent = `${template.name}`;
         }
 
         if (normalizedFields.length === 0) {

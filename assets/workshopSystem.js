@@ -179,14 +179,17 @@ if (root) {
                 safe.id = createId('sheet-template');
             }
 
-            safe.name = isNonEmptyString(safe.name) ? safe.name : `Template ${index + 1}`;
-            safe.type = ['character', 'monster', 'object'].includes(safe.type) ? safe.type : 'character';
-            safe.fields = Array.isArray(safe.fields) ? safe.fields : [];
-            safe.fields = safe.fields
+            const name = isNonEmptyString(safe.name) ? safe.name : `Template ${index + 1}`;
+            const fields = (Array.isArray(safe.fields) ? safe.fields : [])
                 .map((field, fieldIndex) => normalizeSheetTemplateField(field, fieldIndex))
                 .sort((left, right) => (left.order ?? 0) - (right.order ?? 0));
 
-            return safe;
+            // Возвращаем только поддерживаемые ключи шаблона листа.
+            return {
+                id: safe.id,
+                name,
+                fields,
+            };
         });
     }
 
@@ -619,7 +622,7 @@ if (root) {
             btn.className = `workshop-tab-btn${template.id === activeSheetTemplateId ? ' active' : ''}`;
             btn.dataset.action = 'select-sheet-template';
             btn.dataset.sheetTemplateId = template.id;
-            btn.textContent = `${template.name} (${template.type})`;
+            btn.textContent = template.name;
             listNode.appendChild(btn);
         });
 
@@ -641,25 +644,7 @@ if (root) {
             nameInput.disabled = true;
         }
 
-        const typeSelect = document.createElement('select');
-        typeSelect.dataset.field = 'sheet-template-type';
-        typeSelect.dataset.sheetTemplateId = template.id;
-        if (!editable) {
-            typeSelect.disabled = true;
-        }
-
-        ['character', 'monster', 'object'].forEach((type) => {
-            const option = document.createElement('option');
-            option.value = type;
-            option.textContent = type;
-            if (template.type === type) {
-                option.selected = true;
-            }
-            typeSelect.appendChild(option);
-        });
-
         header.appendChild(nameInput);
-        header.appendChild(typeSelect);
 
         if (editable) {
             const removeTemplateBtn = document.createElement('button');
@@ -1452,11 +1437,10 @@ if (root) {
             });
     }
 
-    function createSheetTemplate(name = null, type = 'character') {
+    function createSheetTemplate(name = null) {
         return {
             id: createId('sheet-template'),
             name: isNonEmptyString(name) ? name : `Template ${state.sheetTemplates.length + 1}`,
-            type: ['character', 'monster', 'object'].includes(type) ? type : 'character',
             fields: [],
         };
     }
@@ -1573,16 +1557,6 @@ if (root) {
             const template = getSheetTemplateById(event.target.dataset.sheetTemplateId);
             if (template) {
                 template.name = event.target.value;
-            }
-            renderSheetTemplatesPanel();
-            syncFields();
-            return;
-        }
-
-        if (field === 'sheet-template-type') {
-            const template = getSheetTemplateById(event.target.dataset.sheetTemplateId);
-            if (template) {
-                template.type = ['character', 'monster', 'object'].includes(event.target.value) ? event.target.value : 'character';
             }
             renderSheetTemplatesPanel();
             syncFields();

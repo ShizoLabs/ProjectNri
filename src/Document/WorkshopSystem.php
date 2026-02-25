@@ -349,11 +349,6 @@ class WorkshopSystem
                 $errors[] = sprintf('Sheet template #%d requires a name.', $templateIndex + 1);
             }
 
-            $templateType = $template['type'] ?? null;
-            if (!$this->isNonEmptyString($templateType) || !in_array($templateType, ['character', 'monster', 'object'], true)) {
-                $errors[] = sprintf('Sheet template #%d type must be character, monster, or object.', $templateIndex + 1);
-            }
-
             if (isset($template['fields']) && !is_array($template['fields'])) {
                 $errors[] = sprintf('Sheet template #%d fields must be a list.', $templateIndex + 1);
                 continue;

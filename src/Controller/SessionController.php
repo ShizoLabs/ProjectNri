@@ -122,7 +122,6 @@ final class SessionController extends AbstractController
                     'name' => $sessionToken->getName(),
                     'imagePath' => $sessionToken->getImagePath(),
                     'sheetTemplateName' => is_array($sheetTemplate) ? ($sheetTemplate['name'] ?? null) : null,
-                    'sheetTemplateType' => is_array($sheetTemplate) ? ($sheetTemplate['type'] ?? null) : null,
                 ];
             }
         }

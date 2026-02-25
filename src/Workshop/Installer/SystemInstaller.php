@@ -5,13 +5,34 @@ namespace App\Workshop\Installer;
 use Doctrine\ODM\MongoDB\DocumentManager;
 use App\Workshop\Template\SystemTemplateInterface;
 use App\Document\WorkshopSystem;
-/** Установщик систем. Нужен для ручной установки систем на установку */
+/**
+ * Установщик систем по шаблону.
+ *
+ * Задача класса:
+ * - взять "сырой" шаблон (`SystemTemplateInterface`);
+ * - привести его к единому внутреннему формату `WorkshopSystem`;
+ * - записать документ в MongoDB.
+ *
+ * Важно:
+ * - методы `build*` выполняют нормализацию и защиту от неполных/некорректных данных;
+ * - на выходе всегда формируется консистентная структура, пригодная для UI и валидации.
+ */
 class SystemInstaller
 {
     public function __construct(
         private DocumentManager $dm
     ) {}
 
+    /**
+     * Устанавливает систему из шаблона в документ `WorkshopSystem`.
+     *
+     * @param SystemTemplateInterface $template Источник данных (slug, name, resources, formulas, sheet templates).
+     * @param WorkshopSystem|null $system Целевой документ. Если `null`, создаётся новый.
+     * @param string|null $name Кастомное имя системы. Если пусто/`null`, берём имя из шаблона.
+     * @param string|null $slug Кастомный slug. Если пусто/`null`, берём slug из шаблона и нормализуем.
+     *
+     * @return WorkshopSystem Сохранённый документ системы.
+     */
     public function install(
         SystemTemplateInterface $template,
         ?WorkshopSystem $system = null,
@@ -62,6 +83,21 @@ class SystemInstaller
         return $system;
     }
 
+    /**
+     * Нормализует массив ресурсов шаблона в внутренний формат системы.
+     *
+     * Поддерживаемые форматы входного элемента:
+     * - `string`: трактуется как ключ/имя ресурса (например `strength`);
+     * - `array`: можно передать `name`, `key`, `type`.
+     *
+     * Выходной элемент ресурса:
+     * - `id` (string)          уникальный id ресурса;
+     * - `name` (string)        отображаемое имя ресурса;
+     * - `type` (string)        тип ресурса (например text/number/boolean);
+     * - `tabId` (string)       id вкладки, к которой привязан ресурс;
+     * - `column` (int 0|1)     колонка на вкладке;
+     * - `order` (int)          порядок отображения.
+     */
     private function buildResources(array $resources, string $tabId): array
     {
         $normalized = [];
@@ -87,6 +123,15 @@ class SystemInstaller
         return $normalized;
     }
 
+    /**
+     * Нормализует формулы шаблона в внутренний формат системы.
+     *
+     * Ожидаемый входной элемент:
+     * - массив с `name` или `key`, и `expression`.
+     *
+     * Если элемент не массив, он пропускается.
+     * Если имя пустое, формируется дефолт `Formula N`.
+     */
     private function buildFormulas(array $formulas): array
     {
         $normalized = [];
@@ -110,7 +155,26 @@ class SystemInstaller
     }
 
     /**
-     * Формируем стартовые шаблоны листов токена для выбранной системы.
+     * Формирует стартовые шаблоны листов токена для выбранной системы.
+     *
+     * Вход:
+     * - `$templates` из `SystemTemplateInterface::getSheetTemplates()`;
+     * - уже нормализованные `$resources` и `$formulas`.
+     *
+     * Логика:
+     * 1) Строим набор допустимых `sourceKey` для `resource` и `formula`.
+     * 2) Нормализуем каждый шаблон и каждое поле.
+     * 3) Поля с невалидной ссылкой (`resource`/`formula`) отбрасываем.
+     *
+     * Поддерживаемые значения поля:
+     * - `kind`: `resource` | `formula` | `local` (иначе -> `local`);
+     * - `inputType`: `text` | `number` | `boolean` (иначе -> `text`).
+     *
+     * Выходной формат шаблона листа:
+     * - `id`, `name`, `fields`.
+     *
+     * Выходной формат поля:
+     * - `id`, `label`, `kind`, `sourceKey`, `key`, `inputType`, `readOnly`, `order`.
      */
     private function buildSheetTemplates(array $templates, array $resources, array $formulas): array
     {
@@ -134,10 +198,6 @@ class SystemInstaller
             }
 
             $name = trim((string) ($template['name'] ?? sprintf('Template %d', $templateIndex + 1)));
-            $type = (string) ($template['type'] ?? 'character');
-            if (!in_array($type, ['character', 'monster', 'object'], true)) {
-                $type = 'character';
-            }
 
             $normalizedFields = [];
             $fields = is_array($template['fields'] ?? null) ? $template['fields'] : [];
@@ -179,7 +239,6 @@ class SystemInstaller
             $result[] = [
                 'id' => $this->createId('sheet-template'),
                 'name' => $name !== '' ? $name : sprintf('Template %d', $templateIndex + 1),
-                'type' => $type,
                 'fields' => $normalizedFields,
             ];
         }
@@ -187,6 +246,10 @@ class SystemInstaller
         return $result;
     }
 
+    /**
+     * Преобразует slug-подобную строку в читаемое имя:
+     * `hit_points` -> `Hit points`.
+     */
     private function humanize(string $value): string
     {
         $value = str_replace(['-', '_'], ' ', trim($value));
@@ -195,6 +258,12 @@ class SystemInstaller
         return ucfirst(strtolower($value));
     }
 
+    /**
+     * Нормализует slug:
+     * - lower-case;
+     * - любые не [a-z0-9] заменяются на '-';
+     * - лишние '-' по краям удаляются.
+     */
     private function normalizeSlug(string $slug): string
     {
         $slug = strtolower(trim($slug));
@@ -203,6 +272,14 @@ class SystemInstaller
         return trim($slug, '-');
     }
 
+    /**
+     * Нормализует произвольное имя в ключ:
+     * - lower_snake_case;
+     * - недопустимые символы -> `_`;
+     * - повторяющиеся `_` схлопываются.
+     *
+     * Если после нормализации ключ пустой, возвращает `field`.
+     */
     private function normalizeKey(string $value): string
     {
         $normalized = strtolower(trim($value));
@@ -213,6 +290,11 @@ class SystemInstaller
         return $normalized !== '' ? $normalized : 'field';
     }
 
+    /**
+     * Генерирует id с заданным префиксом.
+     *
+     * Предпочитает криптографически стойкий random_bytes, с fallback на uniqid.
+     */
     private function createId(string $prefix): string
     {
         try {

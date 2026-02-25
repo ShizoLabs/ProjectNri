@@ -129,13 +129,11 @@ final class SheetTemplateCatalogBuilder
                 }
 
                 $templateName = is_string($template['name'] ?? null) ? $template['name'] : $templateId;
-                $templateType = is_string($template['type'] ?? null) ? $template['type'] : 'character';
 
                 $choices[sprintf('%s -> %s', $systemName, $templateName)] = $templateId;
                 $attrs[$templateId] = [
                     'data-template-id' => $templateId,
                     'data-system-id' => $systemId,
-                    'data-template-type' => $templateType,
                 ];
             }
         }
@@ -338,11 +336,6 @@ final class SheetTemplateCatalogBuilder
                 ? trim((string) $template['name'])
                 : sprintf('Template %d', $templateIndex + 1);
 
-            $templateType = is_string($template['type'] ?? null) ? $template['type'] : 'character';
-            if (!in_array($templateType, ['character', 'monster', 'object'], true)) {
-                $templateType = 'character';
-            }
-
             $fields = is_array($template['fields'] ?? null) ? $template['fields'] : [];
             $normalizedFields = [];
             foreach ($fields as $fieldIndex => $field) {
@@ -396,7 +389,6 @@ final class SheetTemplateCatalogBuilder
             $result[] = [
                 'id' => $templateId,
                 'name' => $templateName,
-                'type' => $templateType,
                 'fields' => $normalizedFields,
             ];
         }
