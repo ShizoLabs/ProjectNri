@@ -2,6 +2,7 @@
 
 namespace App\Controller;
 
+use App\Document\Session;
 use App\Document\Token;
 use App\Document\TokenType;
 use App\Document\WorkshopSystem;
@@ -35,12 +36,24 @@ final class TokenController extends AbstractController
         if (is_string($sessionId) && $sessionId !== '') {
             $token->setSessionId($sessionId);
         }
+        $session = $this->resolveSession($dm, $sessionId);
+        if ($session !== null) {
+            $token->setWorkshopSystemId($session->getWorkshopSystemId());
+        }
+        $sessionWorkshopSystemId = $token->getWorkshopSystemId();
 
         $catalog = $this->buildSystemCatalog($dm);
-        $form = $this->createForm(TokenFormType::class, $token, $this->buildTokenFormOptions($catalog));
+        $this->sanitizeTokenSheetTemplateBySessionSystem($token, $catalog);
+        $form = $this->createForm(
+            TokenFormType::class,
+            $token,
+            $this->buildTokenFormOptions($catalog, $sessionWorkshopSystemId)
+        );
         $form->handleRequest($request);
 
         if ($form->isSubmitted()) {
+            // Система токена берётся из сессии, не из payload формы.
+            $token->setWorkshopSystemId($sessionWorkshopSystemId);
             $this->applyTemplateValuesFromForm($form, $token, $catalog);
         }
 
@@ -69,6 +82,7 @@ final class TokenController extends AbstractController
             'sessionId' => $sessionId,
             'tokenTemplateCatalog' => $catalog,
             'tokenValues' => $token->getValues(),
+            'sessionWorkshopSystemId' => $sessionWorkshopSystemId,
         ]);
     }
 
@@ -191,12 +205,24 @@ final class TokenController extends AbstractController
         if (!is_string($sessionId) || $sessionId === '') {
             $sessionId = $token->getSessionId();
         }
+        $session = $this->resolveSession($dm, $sessionId);
+        if ($session !== null) {
+            $token->setWorkshopSystemId($session->getWorkshopSystemId());
+        }
+        $sessionWorkshopSystemId = $token->getWorkshopSystemId();
 
         $catalog = $this->buildSystemCatalog($dm);
-        $form = $this->createForm(TokenFormType::class, $token, $this->buildTokenFormOptions($catalog));
+        $this->sanitizeTokenSheetTemplateBySessionSystem($token, $catalog);
+        $form = $this->createForm(
+            TokenFormType::class,
+            $token,
+            $this->buildTokenFormOptions($catalog, $sessionWorkshopSystemId)
+        );
         $form->handleRequest($request);
 
         if ($form->isSubmitted()) {
+            // Система токена берётся из сессии, не из payload формы.
+            $token->setWorkshopSystemId($sessionWorkshopSystemId);
             $this->applyTemplateValuesFromForm($form, $token, $catalog);
         }
 
@@ -236,6 +262,7 @@ final class TokenController extends AbstractController
             'tokenId' => $token->getId(),
             'tokenTemplateCatalog' => $catalog,
             'tokenValues' => $token->getValues(),
+            'sessionWorkshopSystemId' => $sessionWorkshopSystemId,
         ]);
     }
 
@@ -268,16 +295,34 @@ final class TokenController extends AbstractController
         if (array_key_exists('imagePath', $data)) {
             $token->setImagePath(is_string($data['imagePath']) ? $data['imagePath'] : null);
         }
-        if (array_key_exists('workshopSystemId', $data)) {
-            $token->setWorkshopSystemId(is_string($data['workshopSystemId']) && $data['workshopSystemId'] !== '' ? $data['workshopSystemId'] : null);
-        }
+        $sheetTemplateChanged = false;
         if (array_key_exists('sheetTemplateId', $data)) {
             $token->setSheetTemplateId(is_string($data['sheetTemplateId']) && $data['sheetTemplateId'] !== '' ? $data['sheetTemplateId'] : null);
+            $sheetTemplateChanged = true;
         }
 
-        if (array_key_exists('values', $data) && is_array($data['values'])) {
-            $catalog = $this->buildSystemCatalog($dm);
-            $templateError = $this->hydrateTokenValuesFromTemplate($token, $catalog, $data['values']);
+        $session = $this->resolveSession($dm, $token->getSessionId());
+        if ($session !== null) {
+            $token->setWorkshopSystemId($session->getWorkshopSystemId());
+        }
+
+        $catalog = $this->buildSystemCatalog($dm);
+        $rawValues = null;
+        if (array_key_exists('values', $data)) {
+            if (!is_array($data['values'])) {
+                return $this->json(['error' => 'Invalid values payload.'], 400);
+            }
+
+            $rawValues = $data['values'];
+        }
+
+        // Валидируем выбранный sheet всегда при его смене, даже если values не переданы.
+        if ($sheetTemplateChanged || $rawValues !== null) {
+            $templateError = $this->hydrateTokenValuesFromTemplate(
+                $token,
+                $catalog,
+                is_array($rawValues) ? $rawValues : $token->getValues()
+            );
             if ($templateError !== null) {
                 return $this->json(['error' => $templateError], 400);
             }
@@ -319,14 +364,47 @@ final class TokenController extends AbstractController
     /**
      * @param array<string, array<string, mixed>> $catalog
      */
-    private function buildTokenFormOptions(array $catalog): array
+    private function buildTokenFormOptions(array $catalog, ?string $systemId): array
     {
-        $templateChoiceData = $this->sheetTemplateCatalogBuilder->buildTemplateChoices($catalog);
+        if (!is_string($systemId) || $systemId === '') {
+            return [
+                'sheet_template_choices' => [],
+                'sheet_template_choice_attr' => [],
+            ];
+        }
+
+        $system = $catalog[$systemId] ?? null;
+        if (!is_array($system)) {
+            return [
+                'sheet_template_choices' => [],
+                'sheet_template_choice_attr' => [],
+            ];
+        }
+
+        $choices = [];
+        $attrs = [];
+        $templates = is_array($system['sheetTemplates'] ?? null) ? $system['sheetTemplates'] : [];
+        foreach ($templates as $template) {
+            if (!is_array($template)) {
+                continue;
+            }
+
+            $templateId = $template['id'] ?? null;
+            if (!is_string($templateId) || $templateId === '') {
+                continue;
+            }
+
+            $templateName = is_string($template['name'] ?? null) ? $template['name'] : $templateId;
+            $choices[$templateName] = $templateId;
+            $attrs[$templateId] = [
+                'data-template-id' => $templateId,
+                'data-system-id' => $systemId,
+            ];
+        }
 
         return [
-            'workshop_system_choices' => $this->sheetTemplateCatalogBuilder->buildSystemChoices($catalog),
-            'sheet_template_choices' => $templateChoiceData['choices'],
-            'sheet_template_choice_attr' => $templateChoiceData['attrs'],
+            'sheet_template_choices' => $choices,
+            'sheet_template_choice_attr' => $attrs,
         ];
     }
 
@@ -357,13 +435,13 @@ final class TokenController extends AbstractController
         $systemId = $token->getWorkshopSystemId();
         $templateId = $token->getSheetTemplateId();
 
-        if (($systemId === null || $systemId === '') && ($templateId === null || $templateId === '')) {
+        if ($templateId === null || $templateId === '') {
             $token->setValues([]);
             return null;
         }
 
-        if ($systemId === null || $systemId === '' || $templateId === null || $templateId === '') {
-            return 'Choose both workshop system and sheet template.';
+        if ($systemId === null || $systemId === '') {
+            return 'Session workshop system is not set. Edit session settings first.';
         }
 
         $system = $catalog[$systemId] ?? null;
@@ -424,6 +502,43 @@ final class TokenController extends AbstractController
         $token->setValues($finalValues);
 
         return null;
+    }
+
+    private function resolveSession(DocumentManager $dm, mixed $sessionId): ?Session
+    {
+        if (!is_string($sessionId) || $sessionId === '') {
+            return null;
+        }
+
+        $session = $dm->getRepository(Session::class)->find($sessionId);
+
+        return $session instanceof Session ? $session : null;
+    }
+
+    /**
+     * Если у токена сохранён sheet не из workshop системы текущей сессии,
+     * сбрасываем sheet и values, чтобы форма не работала с несогласованными данными.
+     *
+     * @param array<string, array<string, mixed>> $catalog
+     */
+    private function sanitizeTokenSheetTemplateBySessionSystem(Token $token, array $catalog): void
+    {
+        $sheetTemplateId = $token->getSheetTemplateId();
+        if (!is_string($sheetTemplateId) || $sheetTemplateId === '') {
+            return;
+        }
+
+        $template = $this->sheetTemplateCatalogBuilder->findSheetTemplate(
+            $catalog,
+            $token->getWorkshopSystemId(),
+            $sheetTemplateId
+        );
+        if (is_array($template)) {
+            return;
+        }
+
+        $token->setSheetTemplateId(null);
+        $token->setValues([]);
     }
 
     /**

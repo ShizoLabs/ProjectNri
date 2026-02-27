@@ -1,11 +1,11 @@
 {% extends 'modalContent.html.twig' %}
 
 {% block modalContent %}
-    <h1>Create Session</h1>
-    {{ form_start(form, {action: path('session_create'), method: 'POST'}) }}
+    <h1>Edit Session</h1>
+    {{ form_start(form, {action: path('session_edit', {id: sessionId}), method: 'POST'}) }}
         {{ form_row(form.name) }}
         {{ form_row(form.workshopSystemId) }}
 
-        <button type="submit">Create</button>
+        <button type="submit">Update</button>
     {{ form_end(form) }}
 {% endblock %}

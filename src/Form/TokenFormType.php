@@ -41,12 +41,8 @@ class TokenFormType extends AbstractType
                     'max' => 360,
                 ],
             ])
-            ->add('workshopSystemId', ChoiceType::class, [
+            ->add('workshopSystemId', HiddenType::class, [
                 'required' => false,
-                'placeholder' => 'Select workshop system',
-                'choices' => $options['workshop_system_choices'],
-                'choice_value' => static fn (mixed $choice): string => is_scalar($choice) ? (string) $choice : '',
-                'label' => 'Workshop system',
             ])
             ->add('sheetTemplateId', ChoiceType::class, [
                 'required' => false,
@@ -92,12 +88,10 @@ class TokenFormType extends AbstractType
     {
         $resolver->setDefaults([
             'data_class' => Token::class,
-            'workshop_system_choices' => [],
             'sheet_template_choices' => [],
             'sheet_template_choice_attr' => [],
         ]);
 
-        $resolver->setAllowedTypes('workshop_system_choices', 'array');
         $resolver->setAllowedTypes('sheet_template_choices', 'array');
         $resolver->setAllowedTypes('sheet_template_choice_attr', 'array');
     }

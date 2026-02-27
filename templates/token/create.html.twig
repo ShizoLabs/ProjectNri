@@ -19,9 +19,13 @@
             {{ form_row(form.sizeX) }}
             {{ form_row(form.sizeY) }}
             {{ form_row(form.rotation) }}
-            {{ form_row(form.workshopSystemId) }}
             <div class="token-template-block">
                 <div class="token-template-title">Sheet Values</div>
+                {% if not sessionWorkshopSystemId %}
+                    <div class="token-template-hint">
+                        Session workshop system is not set. Edit session settings first.
+                    </div>
+                {% endif %}
                 {{ form_row(form.sheetTemplateId) }}
                 <div class="token-template-summary" data-token-template-summary></div>
                 <div class="token-template-fields" data-token-template-fields></div>

@@ -20,6 +20,9 @@ class Session
     #[ODM\Field(type: 'date')]
     private \DateTime $updatedAt;
 
+    #[ODM\Field(type: 'string')]
+    private ?string $workshopSystemId = null;
+
     public function __construct()
     {
         $now = new \DateTime();
@@ -54,11 +57,23 @@ class Session
         return $this->updatedAt;
     }
 
+    public function getWorkshopSystemId(): ?string
+    {
+        return $this->workshopSystemId;
+    }
+
     // ---------- Setters ----------
 
     public function setName(string $name): self
     {
         $this->name = $name;
+
+        return $this;
+    }
+
+    public function setWorkshopSystemId(?string $workshopSystemId): self
+    {
+        $this->workshopSystemId = $workshopSystemId;
 
         return $this;
     }

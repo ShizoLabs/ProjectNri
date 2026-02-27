@@ -37,7 +37,7 @@ final class SessionController extends AbstractController
     {
         $session = new Session();
 
-        $form = $this->createForm(SessionType::class, $session);
+        $form = $this->createForm(SessionType::class, $session, $this->buildSessionFormOptions($dm));
         $form->handleRequest($request);
 
         if ($form->isSubmitted() && $form->isValid()) {
@@ -69,6 +69,42 @@ final class SessionController extends AbstractController
             'form' => $form->createView(),
         ]);
     }
+
+    #[Route('/session/{id}/edit', name: 'session_edit', methods: ['GET', 'POST'])]
+    public function edit(Session $session, Request $request, DocumentManager $dm): Response
+    {
+        $previousWorkshopSystemId = $session->getWorkshopSystemId();
+        $form = $this->createForm(SessionType::class, $session, $this->buildSessionFormOptions($dm));
+        $form->handleRequest($request);
+
+        if ($form->isSubmitted() && $form->isValid()) {
+            $workshopSystemChanged = $previousWorkshopSystemId !== $session->getWorkshopSystemId();
+
+            $dm->persist($session);
+
+            if ($workshopSystemChanged) {
+                $this->syncSessionTokensWorkshopSystem($session, $dm);
+            }
+
+            $dm->flush();
+
+            $redirect = $this->generateUrl('session_open', ['id' => $session->getId()]);
+            if ($request->isXmlHttpRequest()) {
+                return $this->json([
+                    'success' => true,
+                    'redirect' => $redirect,
+                ]);
+            }
+
+            return $this->redirectToRoute('session_open', ['id' => $session->getId()]);
+        }
+
+        return $this->render('session/edit.html.twig', [
+            'form' => $form->createView(),
+            'sessionId' => $session->getId(),
+        ]);
+    }
+
     /** Init open session by id */
     #[Route('/session/{id}', name: 'session_open')]
     public function openSession(Session $session, Request $request, DocumentManager $dm): Response
@@ -79,6 +115,11 @@ final class SessionController extends AbstractController
         $sheetCatalog = $this->sheetTemplateCatalogBuilder->buildCatalog(
             $dm->getRepository(WorkshopSystem::class)->findAll()
         );
+        $sessionWorkshopSystemId = $session->getWorkshopSystemId();
+        $sessionWorkshopSystem = is_string($sessionWorkshopSystemId) ? ($sheetCatalog[$sessionWorkshopSystemId] ?? null) : null;
+        $sessionWorkshopSystemName = is_array($sessionWorkshopSystem) && is_string($sessionWorkshopSystem['name'] ?? null)
+            ? $sessionWorkshopSystem['name']
+            : null;
 
         $mapIdParam = $request->query->get('map');
         $map = null;
@@ -130,6 +171,9 @@ final class SessionController extends AbstractController
             'tokens' => $tokensData,
             'sessionTokens' => $templateTokens,
             'sessionId' => $sessionId,
+            'sessionName' => $session->getName(),
+            'sessionWorkshopSystemId' => $sessionWorkshopSystemId,
+            'sessionWorkshopSystemName' => $sessionWorkshopSystemName,
             'map' => $map ? [
                 'id' => $map->getId(),
                 'name' => $map->getName(),
@@ -145,5 +189,36 @@ final class SessionController extends AbstractController
                 ];
             }, $maps),
         ]);
+    }
+
+    private function buildSessionFormOptions(DocumentManager $dm): array
+    {
+        $catalog = $this->sheetTemplateCatalogBuilder->buildCatalog(
+            $dm->getRepository(WorkshopSystem::class)->findAll()
+        );
+
+        return [
+            'workshop_system_choices' => $this->sheetTemplateCatalogBuilder->buildSystemChoices($catalog),
+        ];
+    }
+
+    private function syncSessionTokensWorkshopSystem(Session $session, DocumentManager $dm): void
+    {
+        $sessionId = $session->getId();
+        if (!is_string($sessionId) || $sessionId === '') {
+            return;
+        }
+
+        $tokens = $dm->getRepository(Token::class)->findBy(['sessionId' => $sessionId]);
+        foreach ($tokens as $token) {
+            if (!$token instanceof Token) {
+                continue;
+            }
+
+            $token->setWorkshopSystemId($session->getWorkshopSystemId());
+            $token->setSheetTemplateId(null);
+            $token->setValues([]);
+            $dm->persist($token);
+        }
     }
 }

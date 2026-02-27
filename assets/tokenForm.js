@@ -381,7 +381,7 @@ function initTokenBuilder(form) {
         if (!template) {
             const hint = document.createElement('div');
             hint.className = 'token-template-hint';
-            hint.textContent = 'Select workshop system and sheet template to edit template fields.';
+            hint.textContent = 'Select sheet template to edit template fields.';
             fieldsContainer.appendChild(hint);
             if (summaryContainer) {
                 summaryContainer.textContent = '';
