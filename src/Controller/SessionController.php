@@ -120,6 +120,28 @@ final class SessionController extends AbstractController
         $sessionWorkshopSystemName = is_array($sessionWorkshopSystem) && is_string($sessionWorkshopSystem['name'] ?? null)
             ? $sessionWorkshopSystem['name']
             : null;
+        $sessionFormulas = [];
+        if (is_array($sessionWorkshopSystem)) {
+            $formulas = is_array($sessionWorkshopSystem['formulas'] ?? null) ? $sessionWorkshopSystem['formulas'] : [];
+            foreach ($formulas as $formula) {
+                if (!is_array($formula)) {
+                    continue;
+                }
+
+                $key = $formula['key'] ?? null;
+                $name = $formula['name'] ?? null;
+                $expression = $formula['expression'] ?? null;
+                if (!is_string($key) || $key === '' || !is_string($expression)) {
+                    continue;
+                }
+
+                $sessionFormulas[] = [
+                    'key' => $key,
+                    'name' => is_string($name) && $name !== '' ? $name : $key,
+                    'expression' => $expression,
+                ];
+            }
+        }
 
         $mapIdParam = $request->query->get('map');
         $map = null;
@@ -174,6 +196,7 @@ final class SessionController extends AbstractController
             'sessionName' => $session->getName(),
             'sessionWorkshopSystemId' => $sessionWorkshopSystemId,
             'sessionWorkshopSystemName' => $sessionWorkshopSystemName,
+            'sessionFormulas' => $sessionFormulas,
             'map' => $map ? [
                 'id' => $map->getId(),
                 'name' => $map->getName(),

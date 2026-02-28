@@ -192,8 +192,25 @@ class MainScene extends Phaser.Scene {
         });
         token.tokenLabel.setOrigin(0.5, 0);
         token.tokenLabel.setDepth(2);
-        // Token select
-        token.on('pointerdown', () => {
+        // Token select / context action.
+        token.on('pointerdown', (pointer) => {
+            if (pointer.rightButtonDown()) {
+                const event = pointer.event;
+                if (event && typeof event.preventDefault === 'function') {
+                    event.preventDefault();
+                }
+
+                if (typeof window.openTokenContextMenu === 'function') {
+                    window.openTokenContextMenu({
+                        tokenId: token.tokenId,
+                        tokenName: token.tokenName,
+                        clientX: event?.clientX ?? pointer.x,
+                        clientY: event?.clientY ?? pointer.y,
+                    });
+                }
+                return;
+            }
+
             this.selectToken(token);
         });
         // Drag token. Limit token drag by map size
@@ -275,12 +292,206 @@ const config = {
 // Phaser bootstrap: create the game instance with our scenes
 const game = new Phaser.Game(config);
 
-// Switch tabs
+// Session UI logic
 $(document).ready(function() {
+    const sessionFormulas = Array.isArray(window.SESSION_FORMULAS) ? window.SESSION_FORMULAS : [];
+
+    const functionPopup = $('#token-function-popup');
+    const functionSelect = $('#token-function-select');
+    const functionNameInput = $('#token-function-name');
+    const functionExpressionInput = $('#token-function-expression');
+    const functionTokenIdInput = $('#token-function-token-id');
+    const functionTarget = $('#token-function-target');
+    const functionError = $('#token-function-error');
+    const functionResultList = $('#function-result-list');
+
+    const contextMenu = $('#token-context-menu');
+    let contextMenuToken = null;
+
+    const appendFunctionResult = (payload) => {
+        const safeName = typeof payload?.name === 'string' && payload.name !== '' ? payload.name : 'Function';
+        const safeExpression = typeof payload?.expression === 'string' ? payload.expression : '';
+        const safeResult = payload?.result ?? '';
+
+        const row = $('<div class="function-result-entry"></div>');
+        row.text(`${safeName}:\n${safeExpression} = ${safeResult}`);
+        functionResultList.prepend(row);
+    };
+
+    const showFunctionError = (message) => {
+        if (typeof message === 'string' && message !== '') {
+            functionError.text(message);
+            functionError.prop('hidden', false);
+            return;
+        }
+
+        functionError.text('');
+        functionError.prop('hidden', true);
+    };
+
+    const closeFunctionPopup = () => {
+        functionPopup.prop('hidden', true);
+        showFunctionError('');
+    };
+
+    const getSelectedFormula = () => {
+        const key = String(functionSelect.val() ?? '');
+        if (key === '') {
+            return null;
+        }
+
+        return sessionFormulas.find((formula) => formula && formula.key === key) ?? null;
+    };
+
+    const applySelectedFormulaToInputs = () => {
+        const selected = getSelectedFormula();
+        if (!selected) {
+            return;
+        }
+
+        functionNameInput.val(selected.name ?? selected.key ?? '');
+        functionExpressionInput.val(selected.expression ?? '');
+    };
+
+    const openFunctionPopup = (tokenId, tokenName, presetFormulaKey = '') => {
+        if (!tokenId) {
+            return;
+        }
+
+        hideContextMenu();
+        functionTokenIdInput.val(String(tokenId));
+        functionTarget.text(tokenName ? `Token: ${tokenName}` : 'Token selected');
+        functionSelect.val(presetFormulaKey || '');
+
+        if (presetFormulaKey !== '') {
+            applySelectedFormulaToInputs();
+        } else {
+            functionNameInput.val('');
+            functionExpressionInput.val('');
+        }
+
+        showFunctionError('');
+        functionPopup.prop('hidden', false);
+    };
+
+    const hideContextMenu = () => {
+        contextMenu.prop('hidden', true);
+        contextMenuToken = null;
+    };
+
+    window.openTokenContextMenu = (payload) => {
+        if (!payload || !payload.tokenId) {
+            return;
+        }
+
+        contextMenuToken = {
+            id: String(payload.tokenId),
+            name: payload.tokenName ? String(payload.tokenName) : '',
+        };
+
+        contextMenu.css({
+            left: `${Math.max(8, Number(payload.clientX ?? 0))}px`,
+            top: `${Math.max(8, Number(payload.clientY ?? 0))}px`,
+        });
+        contextMenu.prop('hidden', false);
+    };
+
+    const runFunctionForCurrentPopupToken = () => {
+        const tokenId = String(functionTokenIdInput.val() ?? '').trim();
+        if (tokenId === '') {
+            showFunctionError('Token id is missing.');
+            return;
+        }
+
+        const selectedFormula = getSelectedFormula();
+        const payload = {
+            sessionId: window.SESSION_ID,
+            name: String(functionNameInput.val() ?? '').trim(),
+            expression: String(functionExpressionInput.val() ?? '').trim(),
+            formulaKey: selectedFormula?.key ?? '',
+        };
+
+        $.ajax({
+            url: `/token/${tokenId}/run-function`,
+            method: 'POST',
+            contentType: 'application/json',
+            dataType: 'json',
+            data: JSON.stringify(payload),
+            success: function(response) {
+                if (!response || response.ok !== true) {
+                    showFunctionError(response?.error ?? 'Cannot run function.');
+                    return;
+                }
+
+                appendFunctionResult(response);
+                closeFunctionPopup();
+            },
+            error: function(xhr) {
+                const message = xhr?.responseJSON?.error ?? 'Cannot run function.';
+                showFunctionError(message);
+            }
+        });
+    };
+
+    sessionFormulas.forEach((formula) => {
+        if (!formula || typeof formula !== 'object' || typeof formula.key !== 'string' || formula.key === '') {
+            return;
+        }
+
+        const optionLabel = typeof formula.name === 'string' && formula.name !== '' ? formula.name : formula.key;
+        functionSelect.append(
+            $('<option></option>')
+                .attr('value', formula.key)
+                .text(optionLabel)
+        );
+    });
+
+    functionSelect.on('change', applySelectedFormulaToInputs);
+    $('#token-function-run').on('click', runFunctionForCurrentPopupToken);
+    $('#token-function-close').on('click', closeFunctionPopup);
+
+    $(document).on('keydown', function(event) {
+        if (event.key === 'Escape') {
+            hideContextMenu();
+            if (!functionPopup.prop('hidden')) {
+                closeFunctionPopup();
+            }
+        }
+    });
+
+    $(document).on('click', function(event) {
+        const target = $(event.target);
+        if (!target.closest('#token-context-menu').length) {
+            hideContextMenu();
+        }
+    });
+
+    $('#token-context-run-function').on('click', function() {
+        if (!contextMenuToken) {
+            hideContextMenu();
+            return;
+        }
+
+        openFunctionPopup(contextMenuToken.id, contextMenuToken.name);
+        hideContextMenu();
+    });
+
+    $(document).on('contextmenu', '#game-container', function(event) {
+        event.preventDefault();
+    });
+
+    $(document).on('click', '.token-function-btn', function() {
+        const row = $(this).closest('.token-row');
+        const tokenId = row.data('token-id');
+        const tokenName = row.data('token-name');
+        openFunctionPopup(tokenId, tokenName);
+    });
+
     // Toggle map list panel open/close
     $('#map-list-toggle').click(function() {
         $('#map-list-panel').toggleClass('is-open');
     });
+
     // Switch map by reloading page with ?map=mapId (server uses GET param to select map)
     $(document).on('click', '.map-switch-btn', function() {
         const mapId = $(this).data('map-id');
@@ -290,6 +501,7 @@ $(document).ready(function() {
         const baseUrl = window.SESSION_OPEN_URL || `/session/${window.SESSION_ID}`;
         window.location.href = `${baseUrl}?map=${mapId}`;
     });
+
     // Place token on map: server creates/updates token record (spawn) and returns token data, then we add to scene
     $('.token-place-btn').click(function() {
         const row = $(this).closest('.token-row');
@@ -376,6 +588,7 @@ $(document).ready(function() {
             }
         });
     });
+
     // Switch tabs in controll menu (right side)
     $('.tab-btn').click(function() {
         const tabId = $(this).data('tab');
@@ -387,6 +600,7 @@ $(document).ready(function() {
 
         $('#' + tabId).show();
     });
+
     // Map tool buttons: zoom, center, toggle grid, remove selected token (server call)
     $('.tool-btn').click(function() {
         const tool = $(this).data('tool');

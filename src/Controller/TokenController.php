@@ -110,6 +110,145 @@ final class TokenController extends AbstractController
         return $this->json(['ok' => true]);
     }
 
+    #[Route('/token/{id}/run-function', name: 'token_run_function', methods: ['POST'])]
+    public function runFunction(string $id, Request $request, DocumentManager $dm): JsonResponse
+    {
+        $token = $dm->getRepository(Token::class)->find($id);
+        if (!$token instanceof Token) {
+            return $this->json(['error' => 'Token not found'], Response::HTTP_NOT_FOUND);
+        }
+
+        $payload = json_decode($request->getContent(), true);
+        if (!is_array($payload)) {
+            return $this->json(['error' => 'Invalid payload'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $payloadSessionId = $payload['sessionId'] ?? null;
+        if (is_string($payloadSessionId) && $payloadSessionId !== '' && $token->getSessionId() !== $payloadSessionId) {
+            return $this->json(['error' => 'Token does not belong to current session'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $session = $this->resolveSession($dm, $token->getSessionId());
+        if ($session !== null) {
+            $token->setWorkshopSystemId($session->getWorkshopSystemId());
+        }
+
+        $systemId = $token->getWorkshopSystemId();
+        if (!is_string($systemId) || $systemId === '') {
+            return $this->json(['error' => 'Session workshop system is not set.'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $catalog = $this->buildSystemCatalog($dm);
+        $system = $catalog[$systemId] ?? null;
+        if (!is_array($system)) {
+            return $this->json(['error' => 'Selected workshop system was not found.'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $systemFormulas = is_array($system['formulas'] ?? null) ? $system['formulas'] : [];
+        $baseValues = $token->getValues();
+        $resourceDefaults = [];
+        $resources = is_array($system['resources'] ?? null) ? $system['resources'] : [];
+        foreach ($resources as $resource) {
+            if (!is_array($resource)) {
+                continue;
+            }
+
+            $resourceKey = is_string($resource['key'] ?? null) ? $resource['key'] : null;
+            if ($resourceKey === null || $resourceKey === '') {
+                continue;
+            }
+
+            $resourceType = is_string($resource['type'] ?? null) ? $resource['type'] : 'text';
+            $resourceDefaults[$resourceKey] = match ($resourceType) {
+                'number' => 0,
+                'boolean' => false,
+                default => '',
+            };
+        }
+        $baseValues = array_merge($resourceDefaults, $baseValues);
+
+        $formulaKey = is_string($payload['formulaKey'] ?? null) ? trim((string) $payload['formulaKey']) : '';
+        $customName = is_string($payload['name'] ?? null) ? trim((string) $payload['name']) : '';
+        $customExpression = is_string($payload['expression'] ?? null) ? trim((string) $payload['expression']) : '';
+
+        try {
+            $computedValues = !empty($systemFormulas)
+                ? $this->formulaEngine->computeAll($baseValues, $systemFormulas)
+                : $baseValues;
+        } catch (\Throwable $exception) {
+            return $this->json(
+                ['error' => 'Cannot compute workshop system formulas for this token.'],
+                Response::HTTP_BAD_REQUEST
+            );
+        }
+
+        if ($formulaKey !== '') {
+            $formula = $this->findSystemFormulaByKey($systemFormulas, $formulaKey);
+            if (!is_array($formula)) {
+                return $this->json(
+                    ['error' => 'Selected formula does not exist in current workshop system.'],
+                    Response::HTTP_BAD_REQUEST
+                );
+            }
+
+            $result = $computedValues[$formulaKey] ?? null;
+            if (!is_int($result) && !is_float($result)) {
+                return $this->json(
+                    ['error' => 'Selected formula could not be evaluated.'],
+                    Response::HTTP_BAD_REQUEST
+                );
+            }
+
+            $name = is_string($formula['name'] ?? null) && $formula['name'] !== '' ? $formula['name'] : $formulaKey;
+            $expression = is_string($formula['expression'] ?? null) ? $formula['expression'] : '';
+
+            return $this->json([
+                'ok' => true,
+                'tokenId' => $token->getId(),
+                'name' => $name,
+                'expression' => $expression,
+                'result' => $result,
+            ]);
+        }
+
+        if ($customExpression === '') {
+            return $this->json(
+                ['error' => 'Provide formula key or custom expression.'],
+                Response::HTTP_BAD_REQUEST
+            );
+        }
+
+        $manualFormulaKey = '_manual_result';
+        try {
+            $manualValues = $this->formulaEngine->computeAll($computedValues, [[
+                'key' => $manualFormulaKey,
+                'name' => $manualFormulaKey,
+                'expression' => $customExpression,
+            ]]);
+        } catch (\Throwable $exception) {
+            return $this->json(
+                ['error' => 'Cannot evaluate custom expression.'],
+                Response::HTTP_BAD_REQUEST
+            );
+        }
+
+        $manualResult = $manualValues[$manualFormulaKey] ?? null;
+        if (!is_int($manualResult) && !is_float($manualResult)) {
+            return $this->json(
+                ['error' => 'Custom expression result must be numeric.'],
+                Response::HTTP_BAD_REQUEST
+            );
+        }
+
+        return $this->json([
+            'ok' => true,
+            'tokenId' => $token->getId(),
+            'name' => $customName !== '' ? $customName : 'Custom function',
+            'expression' => $customExpression,
+            'result' => $manualResult,
+        ]);
+    }
+
     #[Route('/token/{id}/spawn', name: 'token_spawn', methods: ['POST'])]
     public function spawn(string $id, Request $request, DocumentManager $dm): JsonResponse
     {
@@ -539,6 +678,24 @@ final class TokenController extends AbstractController
 
         $token->setSheetTemplateId(null);
         $token->setValues([]);
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $formulas
+     */
+    private function findSystemFormulaByKey(array $formulas, string $formulaKey): ?array
+    {
+        foreach ($formulas as $formula) {
+            if (!is_array($formula)) {
+                continue;
+            }
+
+            if (($formula['key'] ?? null) === $formulaKey) {
+                return $formula;
+            }
+        }
+
+        return null;
     }
 
     /**

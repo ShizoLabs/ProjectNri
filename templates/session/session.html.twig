@@ -10,6 +10,7 @@
     window.SESSION_MAP = {{ map|json_encode|raw }};
     window.SESSION_ID = {{ sessionId|json_encode|raw }};
     window.SESSION_OPEN_URL = {{ path('session_open', {id: sessionId})|json_encode|raw }};
+    window.SESSION_FORMULAS = {{ sessionFormulas|json_encode|raw }};
 </script>
 {# Phaser #}
 <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
@@ -55,6 +56,10 @@
             </div>
         </div>
         <div id="game-container"></div>
+        <div id="function-result-panel" class="function-result-panel">
+            <div class="function-result-title">Function Results</div>
+            <div id="function-result-list" class="function-result-list"></div>
+        </div>
     </div>
 
     <!-- Right control panel -->
@@ -87,6 +92,7 @@
                             </div>
                             <button class="token-place-btn" type="button">Add to map</button>
                             <button class="modal token-edit-btn" type="button" data-href="{{ path('token_edit', {id: token.id, session: sessionId}) }}">Edit</button>
+                            <button class="token-function-btn" type="button">Function</button>
                             <button class="token-delete-btn" type="button">Delete</button>
                         </div>
                     {% else %}
@@ -107,5 +113,36 @@
             </div>
         </div>
     </div>
+</div>
+
+<div id="token-function-popup" class="token-function-popup" hidden>
+    <div class="token-function-card">
+        <div class="token-function-header">
+            <div class="token-function-title">Run Function</div>
+            <button id="token-function-close" type="button">Close</button>
+        </div>
+        <div id="token-function-target" class="token-function-target"></div>
+        <input id="token-function-token-id" type="hidden">
+        <div class="token-function-row">
+            <label for="token-function-select">From workshop formulas</label>
+            <select id="token-function-select">
+                <option value="">Custom expression</option>
+            </select>
+        </div>
+        <div class="token-function-row">
+            <label for="token-function-name">Name</label>
+            <input id="token-function-name" type="text" placeholder="e.g. Strength Save">
+        </div>
+        <div class="token-function-row">
+            <label for="token-function-expression">Expression</label>
+            <textarea id="token-function-expression" rows="3" placeholder="e.g. 1d20 + strength_mod + proficiency"></textarea>
+        </div>
+        <div id="token-function-error" class="token-function-error" hidden></div>
+        <button id="token-function-run" type="button">Run</button>
+    </div>
+</div>
+
+<div id="token-context-menu" class="token-context-menu" hidden>
+    <button id="token-context-run-function" type="button">Run function</button>
 </div>
 {% endblock %}
