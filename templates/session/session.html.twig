@@ -11,6 +11,7 @@
     window.SESSION_ID = {{ sessionId|json_encode|raw }};
     window.SESSION_OPEN_URL = {{ path('session_open', {id: sessionId})|json_encode|raw }};
     window.SESSION_FORMULAS = {{ sessionFormulas|json_encode|raw }};
+    window.SESSION_ROLL_HISTORY = {{ sessionRollHistory|json_encode|raw }};
 </script>
 {# Phaser #}
 <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
@@ -66,13 +67,20 @@
     <div id="control-panel" class="control-panel">
         <!-- Tabs buttons -->
         <div id="tabs" style="display: flex; margin-bottom: 1rem;">
-            <button class="tab-btn active" data-tab="tab1" style="flex:1;">Sheets</button>
-            <button class="tab-btn" data-tab="tab2" style="flex:1;">Rules</button>
-            <button class="tab-btn" data-tab="tab3" style="flex:1;">Settings</button>
+            <button class="tab-btn active" data-tab="tab-chat" style="flex:1;">Chat</button>
+            <button class="tab-btn" data-tab="tab-sheets" style="flex:1;">Sheets</button>
+            <button class="tab-btn" data-tab="tab-rules" style="flex:1;">Rules</button>
+            <button class="tab-btn" data-tab="tab-settings" style="flex:1;">Settings</button>
         </div>
         <!-- Tab content -->
         <div id="tab-content">
-            <div class="tab" id="tab1">
+            <div class="tab" id="tab-chat">
+                <div class="chat-roll-history-panel">
+                    <div class="function-result-title">Roll History</div>
+                    <div id="chat-roll-history-list" class="function-result-list"></div>
+                </div>
+            </div>
+            <div class="tab" id="tab-sheets" style="display:none;">
                 <div class="modal" data-href="{{ path('token_create', {session: sessionId}) }}">
                     <span>Create character/object</span>
                 </div>
@@ -100,8 +108,8 @@
                     {% endfor %}
                 </div>
             </div>
-            <div class="tab" id="tab2" style="display:none;">Content for Tab 2</div>
-            <div class="tab" id="tab3" style="display:none;">
+            <div class="tab" id="tab-rules" style="display:none;">Content for Tab 2</div>
+            <div class="tab" id="tab-settings" style="display:none;">
                 <p><strong>Session:</strong> {{ sessionName }}</p>
                 <p>
                     <strong>Workshop system:</strong>

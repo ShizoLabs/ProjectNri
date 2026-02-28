@@ -374,6 +374,24 @@ function initTokenBuilder(form) {
         valuesJsonInput.value = JSON.stringify(currentValues);
     };
 
+    const updateReadOnlyFieldInputs = () => {
+        fieldsContainer.querySelectorAll('input.token-template-input[disabled]').forEach((fieldInput) => {
+            const key = fieldInput.dataset.fieldKey;
+            const inputType = fieldInput.dataset.inputType || 'text';
+            if (!key) {
+                return;
+            }
+
+            if (inputType === 'boolean') {
+                fieldInput.checked = Boolean(currentValues[key]);
+                return;
+            }
+
+            const fallback = defaultByInputType(inputType);
+            fieldInput.value = castByInputType(currentValues[key] ?? fallback, inputType);
+        });
+    };
+
     const renderFields = () => {
         fieldsContainer.innerHTML = '';
 
@@ -466,7 +484,7 @@ function initTokenBuilder(form) {
                 }
 
                 syncValuesJson();
-                renderFields();
+                updateReadOnlyFieldInputs();
             };
 
             input.addEventListener('input', updateFieldValue);

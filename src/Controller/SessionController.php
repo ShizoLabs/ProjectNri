@@ -5,6 +5,7 @@ namespace App\Controller;
 use App\Document\Session;
 use App\Document\Token;
 use App\Document\Map;
+use App\Document\RollHistory;
 use App\Document\WorkshopSystem;
 use App\Form\SessionType;
 use App\Service\SheetTemplateCatalogBuilder;
@@ -112,6 +113,11 @@ final class SessionController extends AbstractController
         $sessionId = $session->getId();
         $tokens = $dm->getRepository(Token::class)->findBy(['sessionId' => $sessionId]);
         $maps = $dm->getRepository(Map::class)->findBy(['sessionId' => $sessionId]);
+        $rollHistory = $dm->getRepository(RollHistory::class)->findBy(
+            ['sessionId' => $sessionId],
+            ['createdAt' => 'desc'],
+            200
+        );
         $sheetCatalog = $this->sheetTemplateCatalogBuilder->buildCatalog(
             $dm->getRepository(WorkshopSystem::class)->findAll()
         );
@@ -211,6 +217,14 @@ final class SessionController extends AbstractController
                     'height' => $map->getHeight(),
                 ];
             }, $maps),
+            'sessionRollHistory' => array_map(static function (RollHistory $entry) {
+                return [
+                    'id' => $entry->getId(),
+                    'sessionId' => $entry->getSessionId(),
+                    'context' => $entry->getContext(),
+                    'createdAt' => $entry->getCreatedAt()->format(\DateTimeInterface::ATOM),
+                ];
+            }, $rollHistory),
         ]);
     }
 

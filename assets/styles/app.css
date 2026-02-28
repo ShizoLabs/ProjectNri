@@ -448,6 +448,12 @@ body {
     font-size: 1.2rem;
 }
 
+.chat-roll-history-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
 .token-function-popup {
     position: fixed;
     inset: 0;

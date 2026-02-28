@@ -2,6 +2,7 @@
 
 namespace App\Controller;
 
+use App\Document\RollHistory;
 use App\Document\Session;
 use App\Document\Token;
 use App\Document\TokenType;
@@ -128,7 +129,12 @@ final class TokenController extends AbstractController
             return $this->json(['error' => 'Token does not belong to current session'], Response::HTTP_BAD_REQUEST);
         }
 
-        $session = $this->resolveSession($dm, $token->getSessionId());
+        $tokenSessionId = $token->getSessionId();
+        if (!is_string($tokenSessionId) || $tokenSessionId === '') {
+            return $this->json(['error' => 'Token does not belong to current session'], Response::HTTP_BAD_REQUEST);
+        }
+
+        $session = $this->resolveSession($dm, $tokenSessionId);
         if ($session !== null) {
             $token->setWorkshopSystemId($session->getWorkshopSystemId());
         }
@@ -201,10 +207,19 @@ final class TokenController extends AbstractController
 
             $name = is_string($formula['name'] ?? null) && $formula['name'] !== '' ? $formula['name'] : $formulaKey;
             $expression = is_string($formula['expression'] ?? null) ? $formula['expression'] : '';
+            $this->persistRollHistory($dm, $tokenSessionId, [
+                'tokenId' => $token->getId(),
+                'tokenName' => $token->getName(),
+                'formulaKey' => $formulaKey,
+                'name' => $name,
+                'expression' => $expression,
+                'result' => $result,
+            ]);
 
             return $this->json([
                 'ok' => true,
                 'tokenId' => $token->getId(),
+                'tokenName' => $token->getName(),
                 'name' => $name,
                 'expression' => $expression,
                 'result' => $result,
@@ -240,10 +255,21 @@ final class TokenController extends AbstractController
             );
         }
 
+        $manualName = $customName !== '' ? $customName : 'Custom function';
+        $this->persistRollHistory($dm, $tokenSessionId, [
+            'tokenId' => $token->getId(),
+            'tokenName' => $token->getName(),
+            'formulaKey' => null,
+            'name' => $manualName,
+            'expression' => $customExpression,
+            'result' => $manualResult,
+        ]);
+
         return $this->json([
             'ok' => true,
             'tokenId' => $token->getId(),
-            'name' => $customName !== '' ? $customName : 'Custom function',
+            'tokenName' => $token->getName(),
+            'name' => $manualName,
             'expression' => $customExpression,
             'result' => $manualResult,
         ]);
@@ -641,6 +667,20 @@ final class TokenController extends AbstractController
         $token->setValues($finalValues);
 
         return null;
+    }
+
+    /**
+     * @param array<string, mixed> $context
+     */
+    private function persistRollHistory(DocumentManager $dm, string $sessionId, array $context): void
+    {
+        $history = new RollHistory();
+        $history
+            ->setSessionId($sessionId)
+            ->setContext($context);
+
+        $dm->persist($history);
+        $dm->flush();
     }
 
     private function resolveSession(DocumentManager $dm, mixed $sessionId): ?Session

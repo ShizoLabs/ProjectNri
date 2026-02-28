@@ -295,6 +295,7 @@ const game = new Phaser.Game(config);
 // Session UI logic
 $(document).ready(function() {
     const sessionFormulas = Array.isArray(window.SESSION_FORMULAS) ? window.SESSION_FORMULAS : [];
+    const sessionRollHistory = Array.isArray(window.SESSION_ROLL_HISTORY) ? window.SESSION_ROLL_HISTORY : [];
 
     const functionPopup = $('#token-function-popup');
     const functionSelect = $('#token-function-select');
@@ -304,19 +305,50 @@ $(document).ready(function() {
     const functionTarget = $('#token-function-target');
     const functionError = $('#token-function-error');
     const functionResultList = $('#function-result-list');
+    const chatRollHistoryList = $('#chat-roll-history-list');
 
     const contextMenu = $('#token-context-menu');
     let contextMenuToken = null;
 
-    const appendFunctionResult = (payload) => {
+    const appendFunctionResult = (payload, mode = 'prepend') => {
+        const safeTokenName = typeof payload?.tokenName === 'string' && payload.tokenName !== '' ? payload.tokenName : 'Unknown token';
         const safeName = typeof payload?.name === 'string' && payload.name !== '' ? payload.name : 'Function';
         const safeExpression = typeof payload?.expression === 'string' ? payload.expression : '';
         const safeResult = payload?.result ?? '';
+        const text = `${safeTokenName} -> ${safeName}:\n${safeExpression} = ${safeResult}`;
 
-        const row = $('<div class="function-result-entry"></div>');
-        row.text(`${safeName}:\n${safeExpression} = ${safeResult}`);
-        functionResultList.prepend(row);
+        const renderIntoList = (list) => {
+            if (!list || list.length === 0) {
+                return;
+            }
+
+            const row = $('<div class="function-result-entry"></div>');
+            row.text(text);
+            if (mode === 'append') {
+                list.append(row);
+                return;
+            }
+
+            list.prepend(row);
+        };
+
+        renderIntoList(functionResultList);
+        renderIntoList(chatRollHistoryList);
     };
+
+    sessionRollHistory.forEach((historyEntry) => {
+        const context = historyEntry?.context;
+        if (!context || typeof context !== 'object') {
+            return;
+        }
+
+        appendFunctionResult({
+            tokenName: context.tokenName,
+            name: context.name,
+            expression: context.expression,
+            result: context.result,
+        }, 'append');
+    });
 
     const showFunctionError = (message) => {
         if (typeof message === 'string' && message !== '') {
