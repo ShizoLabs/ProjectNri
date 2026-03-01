@@ -179,16 +179,27 @@ final class FormulaEngine
     }
 
     // Replace dice notation like "1d8" or "d6" with "dice(1,8)" / "dice(1,6)".
+    // Also normalize bare variable names so expressions like "1d20+strength_mod" work reliably.
     private function normalizeExpression(string $expression): string
     {
         $expression = preg_replace_callback('/\|([^|]+)\|/', function ($matches) {
             return $this->normalizeVariableName($matches[1] ?? '');
         }, $expression) ?? $expression;
 
-        return preg_replace_callback('/\b(\d+)?\s*d\s*(\d+)\b/i', function ($matches) {
+        $expression = preg_replace_callback('/\b(\d+)?\s*d\s*(\d+)\b/i', function ($matches) {
             $count = $matches[1] !== '' ? (int) $matches[1] : 1;
             $sides = (int) $matches[2];
             return sprintf('dice(%d,%d)', $count, $sides);
+        }, $expression) ?? $expression;
+
+        return preg_replace_callback('/\b[a-zA-Z_][a-zA-Z0-9_]*\b/', function ($matches) {
+            $name = (string) ($matches[0] ?? '');
+            $lower = strtolower($name);
+            if (in_array($lower, self::RESERVED_NAMES, true) || in_array($lower, self::FUNCTION_NAMES, true)) {
+                return $lower;
+            }
+
+            return $this->normalizeVariableName($name);
         }, $expression) ?? $expression;
     }
 
@@ -294,8 +305,16 @@ final class FormulaEngine
 
     private function evaluateExpression(string $expression, array $values): float|int
     {
+        $context = $this->buildEvaluationContext($values);
+        $variables = $this->extractVariables($expression);
+        foreach ($variables as $variable) {
+            if (!array_key_exists($variable, $context)) {
+                $context[$variable] = 0;
+            }
+        }
+
         try {
-            $result = $this->expressionLanguage->evaluate($expression, $values);
+            $result = $this->expressionLanguage->evaluate($expression, $context);
         } catch (\Throwable $exception) {
             throw new \RuntimeException('Failed to evaluate expression: ' . $exception->getMessage(), 0, $exception);
         }
@@ -305,6 +324,30 @@ final class FormulaEngine
         }
 
         return $result;
+    }
+
+    /**
+     * Add normalized aliases for keys to make variable resolution tolerant to key formatting.
+     *
+     * @param array<string, mixed> $values
+     * @return array<string, mixed>
+     */
+    private function buildEvaluationContext(array $values): array
+    {
+        $context = $values;
+
+        foreach ($values as $key => $value) {
+            if (!is_string($key) || $key === '') {
+                continue;
+            }
+
+            $normalizedKey = $this->normalizeVariableName($key);
+            if (!array_key_exists($normalizedKey, $context)) {
+                $context[$normalizedKey] = $value;
+            }
+        }
+
+        return $context;
     }
 
     private function registerFunctions(): void

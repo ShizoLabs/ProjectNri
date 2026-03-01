@@ -12,6 +12,9 @@ const parser = new Parser({
     },
 });
 
+const RESERVED_NAMES = new Set(['true', 'false', 'null', 'and', 'or', 'not']);
+const FUNCTION_NAMES = new Set(['floor', 'min', 'max', 'dice']);
+
 // Register custom helpers for expressions.
 parser.functions.dice = (count, sides) => rollDice(count, sides);
 // Симуляция броска. Сколько раз и сколько сторон у куба (2d6 = два броска куба с 6 сторонами)
@@ -53,9 +56,18 @@ function normalizeKey(value) {
 // Нормализует все выражения типа `|Agility|`
 function normalizeExpression(expression) {
     const withTokens = String(expression).replace(/\|([^|]+)\|/g, (_, name) => normalizeVariableName(name));
-    return withTokens.replace(/\b(\d+)?\s*d\s*(\d+)\b/gi, (_, count, sides) => {
+    const withDice = withTokens.replace(/\b(\d+)?\s*d\s*(\d+)\b/gi, (_, count, sides) => {
         const safeCount = count ? Number(count) : 1;
         return `dice(${safeCount},${Number(sides)})`;
+    });
+
+    return withDice.replace(/\b[a-zA-Z_][a-zA-Z0-9_]*\b/g, (name) => {
+        const lower = String(name).toLowerCase();
+        if (RESERVED_NAMES.has(lower) || FUNCTION_NAMES.has(lower)) {
+            return lower;
+        }
+
+        return normalizeVariableName(name);
     });
 }
 // Проверяет какие переменные используются в формуле. Необходима для проверки зависимостей между формулами
@@ -175,7 +187,14 @@ function topologicalSort(depsByKey, dependentsByKey) {
  */
 function evaluateFormula(expression, scope) {
     const normalized = normalizeExpression(expression); // Нормализовать выражение к "безопасному" виду для парсера
-    return parser.evaluate(normalized, scope);
+    const context = buildEvaluationContext(scope);
+    extractVariables(normalized).forEach((variable) => {
+        if (!(variable in context)) {
+            context[variable] = 0;
+        }
+    });
+
+    return parser.evaluate(normalized, context);
 }
 /**
  * Сердце движка.
@@ -312,6 +331,18 @@ function normalizeVariableName(value) {
         .replace(/[^a-z0-9_]/g, '_')
         .replace(/_+/g, '_')
         .replace(/^_+|_+$/g, '') || 'var';
+}
+
+function buildEvaluationContext(values) {
+    const safe = isPlainObject(values) ? { ...values } : {};
+    Object.entries(safe).forEach(([key, value]) => {
+        const normalizedKey = normalizeVariableName(key);
+        if (!(normalizedKey in safe)) {
+            safe[normalizedKey] = value;
+        }
+    });
+
+    return safe;
 }
 
 // Export helpers for tests or inspection if needed.

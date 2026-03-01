@@ -145,6 +145,14 @@
             <label for="token-function-expression">Expression</label>
             <textarea id="token-function-expression" rows="3" placeholder="e.g. 1d20 + strength_mod + proficiency"></textarea>
         </div>
+        <div class="token-function-row">
+            <span>Roll mode</span>
+            <div class="token-function-roll-mode">
+                <label><input type="radio" name="token-function-roll-mode" value="normal" checked> Normal</label>
+                <label><input type="radio" name="token-function-roll-mode" value="advantage"> Advantage</label>
+                <label><input type="radio" name="token-function-roll-mode" value="disadvantage"> Disadvantage</label>
+            </div>
+        </div>
         <div id="token-function-error" class="token-function-error" hidden></div>
         <button id="token-function-run" type="button">Run</button>
     </div>

@@ -303,6 +303,7 @@ $(document).ready(function() {
     const functionExpressionInput = $('#token-function-expression');
     const functionTokenIdInput = $('#token-function-token-id');
     const functionTarget = $('#token-function-target');
+    const functionRollModeInputs = $('input[name="token-function-roll-mode"]');
     const functionError = $('#token-function-error');
     const functionResultList = $('#function-result-list');
     const chatRollHistoryList = $('#chat-roll-history-list');
@@ -310,12 +311,36 @@ $(document).ready(function() {
     const contextMenu = $('#token-context-menu');
     let contextMenuToken = null;
 
+    const normalizeRollMode = (value) => {
+        const mode = String(value ?? '').toLowerCase();
+        if (mode === 'advantage' || mode === 'disadvantage') {
+            return mode;
+        }
+
+        return 'normal';
+    };
+
+    const parseRollResults = (payload) => {
+        const fromArray = Array.isArray(payload?.results) ? payload.results : [];
+        if (fromArray.length > 0) {
+            return fromArray.slice(0, 2);
+        }
+
+        if (payload?.result !== undefined && payload?.result !== null) {
+            return [payload.result];
+        }
+
+        return [];
+    };
+
     const appendFunctionResult = (payload, mode = 'prepend') => {
         const safeTokenName = typeof payload?.tokenName === 'string' && payload.tokenName !== '' ? payload.tokenName : 'Unknown token';
         const safeName = typeof payload?.name === 'string' && payload.name !== '' ? payload.name : 'Function';
         const safeExpression = typeof payload?.expression === 'string' ? payload.expression : '';
-        const safeResult = payload?.result ?? '';
-        const text = `${safeTokenName} -> ${safeName}:\n${safeExpression} = ${safeResult}`;
+        const rollMode = normalizeRollMode(payload?.rollMode);
+        const results = parseRollResults(payload);
+        const selectedIndexRaw = payload?.selectedIndex;
+        const selectedIndex = Number.isInteger(selectedIndexRaw) ? Number(selectedIndexRaw) : null;
 
         const renderIntoList = (list) => {
             if (!list || list.length === 0) {
@@ -323,7 +348,42 @@ $(document).ready(function() {
             }
 
             const row = $('<div class="function-result-entry"></div>');
-            row.text(text);
+            row.append(
+                $('<div class="function-result-entry-title"></div>')
+                    .text(`${safeTokenName} -> ${safeName}`)
+            );
+
+            if (safeExpression !== '') {
+                row.append(
+                    $('<div class="function-result-entry-expression"></div>')
+                        .text(safeExpression)
+                );
+            }
+
+            const values = results.length > 0 ? results : [''];
+            const resultLine = $('<div class="function-result-entry-results"></div>');
+            if (rollMode !== 'normal' && values.length >= 2) {
+                resultLine.append(
+                    $('<span class="function-result-mode"></span>')
+                        .text(rollMode === 'advantage' ? 'Advantage' : 'Disadvantage')
+                );
+            }
+
+            values.forEach((resultValue, index) => {
+                const pill = $('<span class="function-result-pill"></span>').text(String(resultValue));
+
+                if (values.length >= 2 && selectedIndex === index) {
+                    if (rollMode === 'advantage') {
+                        pill.addClass('function-result-pill-advantage');
+                    } else if (rollMode === 'disadvantage') {
+                        pill.addClass('function-result-pill-disadvantage');
+                    }
+                }
+
+                resultLine.append(pill);
+            });
+
+            row.append(resultLine);
             if (mode === 'append') {
                 list.append(row);
                 return;
@@ -346,6 +406,9 @@ $(document).ready(function() {
             tokenName: context.tokenName,
             name: context.name,
             expression: context.expression,
+            rollMode: context.rollMode,
+            results: context.results,
+            selectedIndex: context.selectedIndex,
             result: context.result,
         }, 'append');
     });
@@ -403,6 +466,7 @@ $(document).ready(function() {
         }
 
         showFunctionError('');
+        functionRollModeInputs.filter('[value="normal"]').prop('checked', true);
         functionPopup.prop('hidden', false);
     };
 
@@ -441,6 +505,7 @@ $(document).ready(function() {
             name: String(functionNameInput.val() ?? '').trim(),
             expression: String(functionExpressionInput.val() ?? '').trim(),
             formulaKey: selectedFormula?.key ?? '',
+            rollMode: normalizeRollMode(functionRollModeInputs.filter(':checked').val()),
         };
 
         $.ajax({
@@ -479,6 +544,12 @@ $(document).ready(function() {
     });
 
     functionSelect.on('change', applySelectedFormulaToInputs);
+    functionExpressionInput.on('input', function() {
+        // Any manual expression edit means we are no longer using a predefined formula.
+        if (String(functionSelect.val() ?? '') !== '') {
+            functionSelect.val('');
+        }
+    });
     $('#token-function-run').on('click', runFunctionForCurrentPopupToken);
     $('#token-function-close').on('click', closeFunctionPopup);
 

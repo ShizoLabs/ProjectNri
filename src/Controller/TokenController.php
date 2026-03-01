@@ -176,17 +176,8 @@ final class TokenController extends AbstractController
         $formulaKey = is_string($payload['formulaKey'] ?? null) ? trim((string) $payload['formulaKey']) : '';
         $customName = is_string($payload['name'] ?? null) ? trim((string) $payload['name']) : '';
         $customExpression = is_string($payload['expression'] ?? null) ? trim((string) $payload['expression']) : '';
-
-        try {
-            $computedValues = !empty($systemFormulas)
-                ? $this->formulaEngine->computeAll($baseValues, $systemFormulas)
-                : $baseValues;
-        } catch (\Throwable $exception) {
-            return $this->json(
-                ['error' => 'Cannot compute workshop system formulas for this token.'],
-                Response::HTTP_BAD_REQUEST
-            );
-        }
+        $rollMode = $this->normalizeRollMode($payload['rollMode'] ?? null);
+        $attemptCount = $rollMode === 'normal' ? 1 : 2;
 
         if ($formulaKey !== '') {
             $formula = $this->findSystemFormulaByKey($systemFormulas, $formulaKey);
@@ -197,23 +188,51 @@ final class TokenController extends AbstractController
                 );
             }
 
-            $result = $computedValues[$formulaKey] ?? null;
-            if (!is_int($result) && !is_float($result)) {
+            $results = [];
+            for ($attempt = 0; $attempt < $attemptCount; $attempt++) {
+                try {
+                    $computedValues = !empty($systemFormulas)
+                        ? $this->formulaEngine->computeAll($baseValues, $systemFormulas)
+                        : $baseValues;
+                } catch (\Throwable $exception) {
+                    return $this->json(
+                        ['error' => 'Cannot compute workshop system formulas for this token.'],
+                        Response::HTTP_BAD_REQUEST
+                    );
+                }
+
+                $result = $computedValues[$formulaKey] ?? null;
+                if (!is_int($result) && !is_float($result)) {
+                    return $this->json(
+                        ['error' => 'Selected formula could not be evaluated.'],
+                        Response::HTTP_BAD_REQUEST
+                    );
+                }
+
+                $results[] = $result;
+            }
+
+            $name = is_string($formula['name'] ?? null) && $formula['name'] !== '' ? $formula['name'] : $formulaKey;
+            $expression = is_string($formula['expression'] ?? null) ? $formula['expression'] : '';
+            $selectedIndex = $this->resolveSelectedResultIndex($rollMode, $results);
+            $selectedResult = $results[$selectedIndex ?? 0] ?? null;
+            if (!is_int($selectedResult) && !is_float($selectedResult)) {
                 return $this->json(
                     ['error' => 'Selected formula could not be evaluated.'],
                     Response::HTTP_BAD_REQUEST
                 );
             }
 
-            $name = is_string($formula['name'] ?? null) && $formula['name'] !== '' ? $formula['name'] : $formulaKey;
-            $expression = is_string($formula['expression'] ?? null) ? $formula['expression'] : '';
             $this->persistRollHistory($dm, $tokenSessionId, [
                 'tokenId' => $token->getId(),
                 'tokenName' => $token->getName(),
                 'formulaKey' => $formulaKey,
                 'name' => $name,
                 'expression' => $expression,
-                'result' => $result,
+                'rollMode' => $rollMode,
+                'results' => $results,
+                'selectedIndex' => $selectedIndex,
+                'result' => $selectedResult,
             ]);
 
             return $this->json([
@@ -222,7 +241,10 @@ final class TokenController extends AbstractController
                 'tokenName' => $token->getName(),
                 'name' => $name,
                 'expression' => $expression,
-                'result' => $result,
+                'rollMode' => $rollMode,
+                'results' => $results,
+                'selectedIndex' => $selectedIndex,
+                'result' => $selectedResult,
             ]);
         }
 
@@ -233,36 +255,65 @@ final class TokenController extends AbstractController
             );
         }
 
-        $manualFormulaKey = '_manual_result';
-        try {
-            $manualValues = $this->formulaEngine->computeAll($computedValues, [[
-                'key' => $manualFormulaKey,
-                'name' => $manualFormulaKey,
-                'expression' => $customExpression,
-            ]]);
-        } catch (\Throwable $exception) {
-            return $this->json(
-                ['error' => 'Cannot evaluate custom expression.'],
-                Response::HTTP_BAD_REQUEST
-            );
+        $results = [];
+        $manualFormulaKey = 'manual_result';
+        for ($attempt = 0; $attempt < $attemptCount; $attempt++) {
+            try {
+                $computedValues = !empty($systemFormulas)
+                    ? $this->formulaEngine->computeAll($baseValues, $systemFormulas)
+                    : $baseValues;
+            } catch (\Throwable $exception) {
+                return $this->json(
+                    ['error' => 'Cannot compute workshop system formulas for this token.'],
+                    Response::HTTP_BAD_REQUEST
+                );
+            }
+
+            try {
+                $manualValues = $this->formulaEngine->computeAll($computedValues, [[
+                    'key' => $manualFormulaKey,
+                    'name' => $manualFormulaKey,
+                    'expression' => $customExpression,
+                ]]);
+            } catch (\Throwable $exception) {
+                return $this->json(
+                    ['error' => 'Cannot evaluate custom expression.'],
+                    Response::HTTP_BAD_REQUEST
+                );
+            }
+
+            $manualResult = $manualValues[$manualFormulaKey] ?? null;
+
+            if (!is_int($manualResult) && !is_float($manualResult)) {
+                return $this->json(
+                    ['error' => 'Custom expression result must be numeric.'],
+                    Response::HTTP_BAD_REQUEST
+                );
+            }
+
+            $results[] = $manualResult;
         }
 
-        $manualResult = $manualValues[$manualFormulaKey] ?? null;
-        if (!is_int($manualResult) && !is_float($manualResult)) {
+        $manualName = $customName !== '' ? $customName : 'Custom function';
+        $selectedIndex = $this->resolveSelectedResultIndex($rollMode, $results);
+        $selectedResult = $results[$selectedIndex ?? 0] ?? null;
+        if (!is_int($selectedResult) && !is_float($selectedResult)) {
             return $this->json(
                 ['error' => 'Custom expression result must be numeric.'],
                 Response::HTTP_BAD_REQUEST
             );
         }
 
-        $manualName = $customName !== '' ? $customName : 'Custom function';
         $this->persistRollHistory($dm, $tokenSessionId, [
             'tokenId' => $token->getId(),
             'tokenName' => $token->getName(),
             'formulaKey' => null,
             'name' => $manualName,
             'expression' => $customExpression,
-            'result' => $manualResult,
+            'rollMode' => $rollMode,
+            'results' => $results,
+            'selectedIndex' => $selectedIndex,
+            'result' => $selectedResult,
         ]);
 
         return $this->json([
@@ -271,7 +322,10 @@ final class TokenController extends AbstractController
             'tokenName' => $token->getName(),
             'name' => $manualName,
             'expression' => $customExpression,
-            'result' => $manualResult,
+            'rollMode' => $rollMode,
+            'results' => $results,
+            'selectedIndex' => $selectedIndex,
+            'result' => $selectedResult,
         ]);
     }
 
@@ -681,6 +735,46 @@ final class TokenController extends AbstractController
 
         $dm->persist($history);
         $dm->flush();
+    }
+
+    private function normalizeRollMode(mixed $rollMode): string
+    {
+        if (!is_string($rollMode)) {
+            return 'normal';
+        }
+
+        $normalized = strtolower(trim($rollMode));
+        if (in_array($normalized, ['normal', 'advantage', 'disadvantage'], true)) {
+            return $normalized;
+        }
+
+        return 'normal';
+    }
+
+    /**
+     * @param array<int, int|float> $results
+     */
+    private function resolveSelectedResultIndex(string $rollMode, array $results): ?int
+    {
+        if (count($results) <= 1) {
+            return 0;
+        }
+
+        $first = $results[0];
+        $second = $results[1];
+        if ($first === $second) {
+            return null;
+        }
+
+        if ($rollMode === 'advantage') {
+            return $first > $second ? 0 : 1;
+        }
+
+        if ($rollMode === 'disadvantage') {
+            return $first < $second ? 0 : 1;
+        }
+
+        return 0;
     }
 
     private function resolveSession(DocumentManager $dm, mixed $sessionId): ?Session
