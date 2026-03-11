@@ -23,6 +23,12 @@ class MainScene extends Phaser.Scene {
         this.mapHeight = 2000;
         this.gridSize = 50;
         this.selectedToken = null;
+        this.feetPerCell = 5;
+        this.activeMeasureTool = null;
+        this.isMeasuring = false;
+        this.measureStartCell = null;
+        this.measureGraphics = null;
+        this.measureLabel = null;
     }
 
     create() {
@@ -55,6 +61,17 @@ class MainScene extends Phaser.Scene {
         grid.setDepth(0); // Grid as neutral layer
         this.gridLayer = grid;
         this.gridVisible = true;
+        /** -----MEASUREMENT OVERLAY----- */
+        this.measureGraphics = this.add.graphics();
+        this.measureGraphics.setDepth(20);
+        this.measureLabel = this.add.text(0, 0, '', {
+            fontSize: '13px',
+            color: '#ffffff',
+            backgroundColor: 'rgba(0,0,0,0.55)',
+            padding: { x: 6, y: 4 },
+        });
+        this.measureLabel.setDepth(21);
+        this.measureLabel.setVisible(false);
         /** -----TOKENS----- */
         this.tokensGroup = this.add.group();
         // Load token images if needed, then instantiate tokens from SESSION_TOKENS
@@ -93,6 +110,13 @@ class MainScene extends Phaser.Scene {
         });
 
         this.input.on('pointerdown', (pointer, gameObjects) => {
+            if (pointer.rightButtonDown()) {
+                return;
+            }
+            if (this.isMeasurementToolActive()) {
+                this.beginMeasurement(pointer);
+                return;
+            }
             if (gameObjects && gameObjects.length > 0) {
                 return;
             }
@@ -104,9 +128,24 @@ class MainScene extends Phaser.Scene {
         this.input.on('pointerup', () => {
             this.isPanning = false;
             this.lastPanPoint = null;
+            if (this.isMeasuring) {
+                this.finishMeasurement();
+            }
+        });
+
+        this.input.on('pointerupoutside', () => {
+            this.isPanning = false;
+            this.lastPanPoint = null;
+            if (this.isMeasuring) {
+                this.finishMeasurement();
+            }
         });
 
         this.input.on('pointermove', (pointer) => {
+            if (this.isMeasuring) {
+                this.updateMeasurement(pointer);
+                return;
+            }
             if (!this.isPanning || !this.lastPanPoint) {
                 return;
             }
@@ -137,6 +176,216 @@ class MainScene extends Phaser.Scene {
         if (token.selectionOutline) {
             token.selectionOutline.setVisible(selected);
         }
+    }
+    isMeasurementToolActive() {
+        return this.activeMeasureTool === 'ruler'
+            || this.activeMeasureTool === 'compass'
+            || this.activeMeasureTool === 'cone';
+    }
+    setMeasurementTool(tool) {
+        if (tool !== 'ruler' && tool !== 'compass' && tool !== 'cone') {
+            this.activeMeasureTool = null;
+            this.finishMeasurement();
+            return;
+        }
+
+        this.activeMeasureTool = tool;
+        this.finishMeasurement();
+    }
+    getCellFromWorld(worldX, worldY) {
+        if (!Number.isFinite(worldX) || !Number.isFinite(worldY)) {
+            return null;
+        }
+
+        const maxX = Math.max(0, this.mapWidth - 1);
+        const maxY = Math.max(0, this.mapHeight - 1);
+        const clampedX = Phaser.Math.Clamp(worldX, 0, maxX);
+        const clampedY = Phaser.Math.Clamp(worldY, 0, maxY);
+        const col = Math.floor(clampedX / this.gridSize);
+        const row = Math.floor(clampedY / this.gridSize);
+
+        return {
+            col,
+            row,
+            centerX: col * this.gridSize + this.gridSize / 2,
+            centerY: row * this.gridSize + this.gridSize / 2,
+        };
+    }
+    getCellFromPointer(pointer) {
+        return this.getCellFromWorld(pointer.worldX, pointer.worldY);
+    }
+    getCellDistance(startCell, endCell) {
+        const dx = endCell.col - startCell.col;
+        const dy = endCell.row - startCell.row;
+
+        return Math.round(Math.hypot(dx, dy));
+    }
+    beginMeasurement(pointer) {
+        const startCell = this.getCellFromPointer(pointer);
+        if (!startCell) {
+            return;
+        }
+
+        this.deselectToken();
+        this.isPanning = false;
+        this.lastPanPoint = null;
+        this.measureStartCell = startCell;
+        this.isMeasuring = true;
+        this.updateMeasurement(pointer);
+    }
+    updateMeasurement(pointer) {
+        if (!this.isMeasuring || !this.measureStartCell || !this.isMeasurementToolActive()) {
+            return;
+        }
+
+        const endCell = this.getCellFromPointer(pointer);
+        if (!endCell) {
+            return;
+        }
+
+        this.clearMeasurementOverlay();
+
+        if (this.activeMeasureTool === 'ruler') {
+            this.drawRulerMeasurement(this.measureStartCell, endCell);
+            return;
+        }
+
+        if (this.activeMeasureTool === 'compass') {
+            this.drawCompassMeasurement(this.measureStartCell, endCell);
+            return;
+        }
+
+        this.drawConeMeasurement(this.measureStartCell, endCell);
+    }
+    finishMeasurement() {
+        this.isMeasuring = false;
+        this.measureStartCell = null;
+        this.clearMeasurementOverlay();
+    }
+    clearMeasurementOverlay() {
+        if (this.measureGraphics) {
+            this.measureGraphics.clear();
+        }
+        if (this.measureLabel) {
+            this.measureLabel.setText('');
+            this.measureLabel.setVisible(false);
+        }
+    }
+    drawRulerMeasurement(startCell, endCell) {
+        const distanceCells = this.getCellDistance(startCell, endCell);
+        const distanceFeet = distanceCells * this.feetPerCell;
+
+        this.measureGraphics.lineStyle(2, 0x3ec8ff, 0.95);
+        this.measureGraphics.strokeLineShape(new Phaser.Geom.Line(
+            startCell.centerX,
+            startCell.centerY,
+            endCell.centerX,
+            endCell.centerY
+        ));
+        this.measureGraphics.fillStyle(0x3ec8ff, 0.95);
+        this.measureGraphics.fillCircle(startCell.centerX, startCell.centerY, 4);
+        this.measureGraphics.fillCircle(endCell.centerX, endCell.centerY, 4);
+
+        this.updateMeasurementLabel(
+            endCell.centerX,
+            endCell.centerY,
+            `Distance: ${distanceFeet} ft (${distanceCells} cells)`
+        );
+    }
+    drawCompassMeasurement(startCell, endCell) {
+        const radiusCells = this.getCellDistance(startCell, endCell);
+        const radiusFeet = radiusCells * this.feetPerCell;
+        const radiusPx = radiusCells * this.gridSize;
+
+        this.measureGraphics.fillStyle(0xf9d45a, 0.14);
+        this.measureGraphics.lineStyle(2, 0xf9d45a, 0.95);
+        if (radiusPx > 0) {
+            this.measureGraphics.fillCircle(startCell.centerX, startCell.centerY, radiusPx);
+            this.measureGraphics.strokeCircle(startCell.centerX, startCell.centerY, radiusPx);
+        } else {
+            this.measureGraphics.fillCircle(startCell.centerX, startCell.centerY, 4);
+        }
+        this.measureGraphics.lineStyle(1, 0xf9d45a, 0.95);
+        this.measureGraphics.strokeLineShape(new Phaser.Geom.Line(
+            startCell.centerX,
+            startCell.centerY,
+            endCell.centerX,
+            endCell.centerY
+        ));
+
+        this.updateMeasurementLabel(
+            endCell.centerX,
+            endCell.centerY,
+            `Radius: ${radiusFeet} ft (${radiusCells} cells)`
+        );
+    }
+    drawConeMeasurement(startCell, endCell) {
+        const lengthCells = this.getCellDistance(startCell, endCell);
+        const lengthFeet = lengthCells * this.feetPerCell;
+
+        if (lengthCells <= 0) {
+            this.measureGraphics.fillStyle(0xa67bff, 0.95);
+            this.measureGraphics.fillCircle(startCell.centerX, startCell.centerY, 4);
+            this.updateMeasurementLabel(
+                startCell.centerX,
+                startCell.centerY,
+                'Cone: 0 ft'
+            );
+            return;
+        }
+
+        const lengthPx = lengthCells * this.gridSize;
+        const radiusCells = Math.max(1, Math.round(lengthCells / 2));
+        const radiusFeet = radiusCells * this.feetPerCell;
+        const radiusPx = radiusCells * this.gridSize;
+        const angle = Phaser.Math.Angle.Between(
+            startCell.centerX,
+            startCell.centerY,
+            endCell.centerX,
+            endCell.centerY
+        );
+        const endCenterX = startCell.centerX + Math.cos(angle) * lengthPx;
+        const endCenterY = startCell.centerY + Math.sin(angle) * lengthPx;
+        const perpX = -Math.sin(angle) * radiusPx;
+        const perpY = Math.cos(angle) * radiusPx;
+        const leftX = endCenterX + perpX;
+        const leftY = endCenterY + perpY;
+        const rightX = endCenterX - perpX;
+        const rightY = endCenterY - perpY;
+
+        this.measureGraphics.fillStyle(0xa67bff, 0.22);
+        this.measureGraphics.beginPath();
+        this.measureGraphics.moveTo(startCell.centerX, startCell.centerY);
+        this.measureGraphics.lineTo(leftX, leftY);
+        this.measureGraphics.lineTo(rightX, rightY);
+        this.measureGraphics.closePath();
+        this.measureGraphics.fillPath();
+        this.measureGraphics.lineStyle(2, 0xa67bff, 0.95);
+        this.measureGraphics.strokePath();
+        this.measureGraphics.lineStyle(1, 0xd7c5ff, 0.95);
+        this.measureGraphics.strokeLineShape(new Phaser.Geom.Line(
+            startCell.centerX,
+            startCell.centerY,
+            endCenterX,
+            endCenterY
+        ));
+
+        this.updateMeasurementLabel(
+            endCenterX,
+            endCenterY,
+            `Cone: L ${lengthFeet} ft (${lengthCells}), R ${radiusFeet} ft (${radiusCells})`
+        );
+    }
+    updateMeasurementLabel(worldX, worldY, text) {
+        if (!this.measureLabel) {
+            return;
+        }
+
+        const zoom = this.cameras.main?.zoom ?? 1;
+        const offset = 12 / zoom;
+        this.measureLabel.setText(text);
+        this.measureLabel.setPosition(worldX + offset, worldY + offset);
+        this.measureLabel.setVisible(true);
     }
 
     addToken(data) {
@@ -211,10 +460,17 @@ class MainScene extends Phaser.Scene {
                 return;
             }
 
+            if (this.isMeasurementToolActive()) {
+                return;
+            }
+
             this.selectToken(token);
         });
         // Drag token. Limit token drag by map size
         token.on('drag', (pointer, dragX, dragY) => {
+            if (this.isMeasurementToolActive()) {
+                return;
+            }
             const halfW = sizeX / 2;
             const halfH = sizeY / 2;
             token.x = Phaser.Math.Clamp(dragX, halfW, mapW - halfW);
@@ -223,6 +479,9 @@ class MainScene extends Phaser.Scene {
         });
         // On dragend snap to grid and persist new position via AJAX. Add error handling & CSRF token.
         token.on('dragend', () => {
+            if (this.isMeasurementToolActive()) {
+                return;
+            }
             const snappedX = Math.round((token.x - gs / 2) / gs) * gs + gs / 2;
             const snappedY = Math.round((token.y - gs / 2) / gs) * gs + gs / 2;
             // Change position only if was really moved
@@ -310,6 +569,63 @@ $(document).ready(function() {
 
     const contextMenu = $('#token-context-menu');
     let contextMenuToken = null;
+    const measureToolHint = $('#measure-tool-hint');
+    const domToSceneMeasureTool = {
+        'measure-ruler': 'ruler',
+        'measure-compass': 'compass',
+        'measure-cone': 'cone',
+    };
+
+    const setMeasureToolHint = (tool) => {
+        if (!measureToolHint.length) {
+            return;
+        }
+
+        if (tool === 'ruler') {
+            measureToolHint.text('Ruler: hold LMB and drag to measure cell-to-cell distance.');
+            return;
+        }
+
+        if (tool === 'compass') {
+            measureToolHint.text('Compass: hold LMB and drag to preview radius from the start cell.');
+            return;
+        }
+
+        if (tool === 'cone') {
+            measureToolHint.text('Cone: hold LMB and drag to preview cone length and radius.');
+            return;
+        }
+
+        measureToolHint.text('Measurement tool is off.');
+    };
+
+    const setMeasureToolButtonsState = (sceneTool) => {
+        $('.tool-btn[data-tool="measure-ruler"], .tool-btn[data-tool="measure-compass"], .tool-btn[data-tool="measure-cone"]')
+            .removeClass('active');
+
+        const activeDomTool = Object.keys(domToSceneMeasureTool)
+            .find((domTool) => domToSceneMeasureTool[domTool] === sceneTool);
+        if (activeDomTool) {
+            $(`.tool-btn[data-tool="${activeDomTool}"]`).addClass('active');
+        }
+
+        setMeasureToolHint(sceneTool ?? null);
+    };
+
+    const toggleMeasureTool = (scene, domTool) => {
+        const requestedTool = domToSceneMeasureTool[domTool] ?? null;
+        if (!requestedTool) {
+            return false;
+        }
+
+        const nextTool = scene.activeMeasureTool === requestedTool ? null : requestedTool;
+        scene.setMeasurementTool(nextTool);
+        setMeasureToolButtonsState(nextTool);
+
+        return true;
+    };
+
+    setMeasureToolHint(null);
 
     const normalizeRollMode = (value) => {
         const mode = String(value ?? '').toLowerCase();
@@ -559,6 +875,10 @@ $(document).ready(function() {
             if (!functionPopup.prop('hidden')) {
                 closeFunctionPopup();
             }
+            const scene = game.scene.keys.MainScene;
+            if (scene) {
+                scene.finishMeasurement();
+            }
         }
     });
 
@@ -709,6 +1029,9 @@ $(document).ready(function() {
         const tool = $(this).data('tool');
         const scene = game.scene.keys.MainScene;
         if (!scene) {
+            return;
+        }
+        if (toggleMeasureTool(scene, tool)) {
             return;
         }
         const camera = scene.cameras.main;

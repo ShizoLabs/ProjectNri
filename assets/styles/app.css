@@ -291,9 +291,24 @@ body {
     text-align: left;
 }
 
+.tool-btn.active {
+    border-color: #5bb9de;
+    background: rgba(48, 110, 143, 0.35);
+}
+
 .tool-danger {
     border-color: #a33;
     color: #ffdddd;
+}
+
+.map-tool-hint {
+    border: 1px dashed #4a6674;
+    color: #c8d9e3;
+    padding: 0.6rem 0.8rem;
+    font-size: 1.1rem;
+    min-height: 4.8rem;
+    display: flex;
+    align-items: center;
 }
 
 .map-area {
