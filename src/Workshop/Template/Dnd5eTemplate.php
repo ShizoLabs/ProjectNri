@@ -90,6 +90,12 @@ class Dnd5eTemplate extends AbstractSystemTemplate
             'survival_prof',
         ];
     }
+
+    public function getAbilities(): array
+    {
+        return [];
+    }
+
     /**
      * Возвращает вычисляемые формулы системы.
      *

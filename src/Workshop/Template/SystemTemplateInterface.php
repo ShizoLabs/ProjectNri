@@ -8,6 +8,7 @@ interface SystemTemplateInterface
     public function getName(): string; // Dungeons & Dragons 5e
 
     public function getResources(): array;
+    public function getAbilities(): array;
     public function getFormulas(): array;
     public function getSheetTemplates(): array;
 }

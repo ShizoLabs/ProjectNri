@@ -23,22 +23,8 @@ if (root) {
         { label: 'round(x)', detail: 'function', insertText: 'round()', cursorOffset: -1 },
     ];
 
-    // Карта старых ресурсов нужна для обратной совместимости с предыдущей структурой данных.
-    const legacyResourceMap = buildLegacyResourceMap(payload.resources);
-    const tabs = normalizeTabs(payload.tabs, legacyResourceMap);
-    // В системе всегда должна существовать хотя бы одна вкладка.
-    if (tabs.length === 0) {
-        tabs.push(createDefaultTab('Tab 1', 0));
-    }
-
     // Единое состояние конструктора, которое сериализуется в скрытые поля формы.
-    const state = {
-        settings: payload.settings ?? {},
-        tabs,
-        formulas: normalizeFormulas(payload.formulas),
-        sheetTemplates: normalizeSheetTemplates(payload.sheetTemplates),
-        meta: payload.meta ?? {},
-    };
+    const state = buildInitialState(payload);
 
     // Результаты валидации каждой формулы (по id).
     const formulaValidationById = new Map();
@@ -88,83 +74,216 @@ if (root) {
         return exprParser;
     }
 
-    // Нормализация вкладок, включая поддержку старых данных (elements -> resources).
-    function normalizeTabs(list, legacyMap) {
+    function buildInitialState(rawPayload) {
+        const rawTabs = Array.isArray(rawPayload.tabs) ? rawPayload.tabs : [];
+        const legacyResourceMap = buildLegacyResourceMap(rawPayload.resources);
+        const tabs = normalizeTabs(rawTabs);
+
+        if (tabs.length === 0) {
+            tabs.push(createDefaultTab('Tab 1', 0));
+        }
+
+        const fallbackTabId = tabs[0]?.id ?? createId('tab');
+        const resources = normalizeResources(rawPayload.resources, fallbackTabId);
+        const abilities = normalizeAbilities(rawPayload.abilities, fallbackTabId);
+        const formulas = normalizeFormulas(rawPayload.formulas);
+
+        if (resources.length === 0) {
+            resources.push(...extractResourcesFromTabs(rawTabs, legacyResourceMap));
+        }
+        if (abilities.length === 0) {
+            abilities.push(...extractAbilitiesFromTabs(rawTabs));
+        }
+        if (formulas.length === 0) {
+            formulas.push(...extractFormulasFromTabs(rawTabs));
+        }
+
+        ensureItemsUseKnownTabs(resources, tabs, fallbackTabId);
+        ensureItemsUseKnownTabs(abilities, tabs, fallbackTabId);
+        ensureFormulaTabs(formulas, tabs);
+        reindexAllColumns(tabs, resources, abilities, formulas);
+
+        return {
+            settings: rawPayload.settings ?? {},
+            tabs,
+            resources,
+            abilities,
+            formulas,
+            sheetTemplates: normalizeSheetTemplates(rawPayload.sheetTemplates),
+            meta: rawPayload.meta ?? {},
+        };
+    }
+
+    // Нормализация вкладок до метаданных; карточки хранятся отдельно по типам.
+    function normalizeTabs(list) {
         if (!Array.isArray(list)) {
             return [];
         }
 
         return list.map((tab, index) => {
             const safe = isPlainObject(tab) ? tab : {};
-            if (!isNonEmptyString(safe.id)) {
-                safe.id = createId('tab');
-            }
-            if (!isNonEmptyString(safe.name)) {
-                safe.name = `Tab ${index + 1}`;
-            }
-            safe.order = Number.isInteger(safe.order) ? safe.order : index;
-            safe.resources = Array.isArray(safe.resources) ? safe.resources : [];
-
-            if (safe.resources.length === 0 && Array.isArray(safe.elements)) {
-                safe.resources = safe.elements.map((element, elementIndex) => {
-                    const legacy = legacyMap[element.resourceId] ?? {};
-                    return normalizeResource(
-                        {
-                            id: element.id ?? createId('res'),
-                            name: legacy.name ?? `Resource ${elementIndex + 1}`,
-                            type: legacy.type ?? 'text',
-                            position: { column: 0, order: elementIndex },
-                        },
-                        elementIndex
-                    );
-                });
-            } else {
-                safe.resources = safe.resources.map((resource, resourceIndex) => normalizeResource(resource, resourceIndex));
-            }
-
-            if (safe.elements) {
-                delete safe.elements;
-            }
-
-            return safe;
+            return {
+                id: isNonEmptyString(safe.id) ? safe.id : createId('tab'),
+                name: isNonEmptyString(safe.name) ? safe.name : `Tab ${index + 1}`,
+                order: isNumeric(safe.order) ? Number(safe.order) : index,
+            };
         });
     }
 
-    // Нормализация ресурса вкладки с гарантией обязательных полей и позиции.
-    function normalizeResource(resource, resourceIndex) {
-        const safe = isPlainObject(resource) ? resource : {};
-        if (!isNonEmptyString(safe.id)) {
-            safe.id = createId('res');
-        }
-        if (!isNonEmptyString(safe.name)) {
-            safe.name = 'Resource';
-        }
-        if (!isNonEmptyString(safe.type)) {
-            safe.type = 'text';
+    // Нормализация плоского списка ресурсов.
+    function normalizeResources(list, fallbackTabId) {
+        if (!Array.isArray(list)) {
+            return [];
         }
 
-        const position = isPlainObject(safe.position) ? safe.position : {};
-        const column = position.column === 1 ? 1 : 0;
-        const order = isNumeric(position.order) ? Number(position.order) : resourceIndex;
-        safe.position = { column, order };
-        return safe;
+        return list.map((resource, index) => normalizeResource(resource, fallbackTabId, index));
     }
 
-    // Нормализация формул: id, name, expression всегда присутствуют.
+    // Нормализация одного ресурса с позицией внутри вкладки.
+    function normalizeResource(resource, fallbackTabId, resourceIndex) {
+        const safe = isPlainObject(resource) ? { ...resource } : {};
+        const position = isPlainObject(safe.position) ? safe.position : {};
+
+        return {
+            id: isNonEmptyString(safe.id) ? safe.id : createId('res'),
+            name: isNonEmptyString(safe.name) ? safe.name : 'Resource',
+            type: isNonEmptyString(safe.type) ? safe.type : 'text',
+            tabId: isNonEmptyString(safe.tabId) ? safe.tabId : fallbackTabId,
+            column: safe.column === 1 || position.column === 1 ? 1 : 0,
+            order: isNumeric(safe.order) ? Number(safe.order) : (isNumeric(position.order) ? Number(position.order) : resourceIndex),
+        };
+    }
+
+    // Нормализация плоского списка способностей.
+    function normalizeAbilities(list, fallbackTabId) {
+        if (!Array.isArray(list)) {
+            return [];
+        }
+
+        return list.map((ability, index) => normalizeAbility(ability, fallbackTabId, index));
+    }
+
+    // Нормализация способности с обязательными строковыми полями.
+    function normalizeAbility(ability, fallbackTabId, abilityIndex) {
+        const safe = isPlainObject(ability) ? { ...ability } : {};
+        const position = isPlainObject(safe.position) ? safe.position : {};
+        const type = ['active', 'passive', 'special'].includes(safe.type) ? safe.type : 'active';
+
+        return {
+            id: isNonEmptyString(safe.id) ? safe.id : createId('ability'),
+            name: isNonEmptyString(safe.name) ? safe.name : `Ability ${abilityIndex + 1}`,
+            description: typeof safe.description === 'string' ? safe.description : '',
+            unlock_condition: typeof safe.unlock_condition === 'string' ? safe.unlock_condition : '',
+            use_condition: typeof safe.use_condition === 'string' ? safe.use_condition : '',
+            trigger_condition: typeof safe.trigger_condition === 'string' ? safe.trigger_condition : '',
+            type,
+            grants: typeof safe.grants === 'string' ? safe.grants : '',
+            icon: typeof safe.icon === 'string' ? safe.icon : '',
+            tabId: isNonEmptyString(safe.tabId) ? safe.tabId : fallbackTabId,
+            column: safe.column === 1 || position.column === 1 ? 1 : 0,
+            order: isNumeric(safe.order) ? Number(safe.order) : (isNumeric(position.order) ? Number(position.order) : abilityIndex),
+        };
+    }
+
+    // Нормализация плоского списка формул.
     function normalizeFormulas(list) {
         if (!Array.isArray(list)) {
             return [];
         }
 
-        return list.map((formula, index) => {
-            const safe = isPlainObject(formula) ? { ...formula } : {};
-            if (!isNonEmptyString(safe.id)) {
-                safe.id = createId('formula');
-            }
-            safe.name = isNonEmptyString(safe.name) ? safe.name : `Formula ${index + 1}`;
-            safe.expression = typeof safe.expression === 'string' ? safe.expression : '';
-            return safe;
+        return list.map((formula, index) => normalizeFormula(formula, null, index));
+    }
+
+    // Нормализация формулы: id, name, expression и позиция.
+    function normalizeFormula(formula, fallbackTabId = null, formulaIndex = 0) {
+        const safe = isPlainObject(formula) ? { ...formula } : {};
+        const position = isPlainObject(safe.position) ? safe.position : {};
+
+        return {
+            id: isNonEmptyString(safe.id) ? safe.id : createId('formula'),
+            name: isNonEmptyString(safe.name) ? safe.name : `Formula ${formulaIndex + 1}`,
+            expression: typeof safe.expression === 'string' ? safe.expression : '',
+            tabId: isNonEmptyString(safe.tabId) ? safe.tabId : fallbackTabId,
+            column: safe.column === 1 || position.column === 1 ? 1 : 0,
+            order: isNumeric(safe.order) ? Number(safe.order) : (isNumeric(position.order) ? Number(position.order) : formulaIndex),
+        };
+    }
+
+    // Восстановление ресурсов из старой структуры tabs.resources/elements.
+    function extractResourcesFromTabs(tabs, legacyMap) {
+        if (!Array.isArray(tabs)) {
+            return [];
+        }
+
+        const items = [];
+        tabs.forEach((tab, tabIndex) => {
+            const safeTab = isPlainObject(tab) ? tab : {};
+            const tabId = isNonEmptyString(safeTab.id) ? safeTab.id : `legacy-tab-${tabIndex + 1}`;
+            const nestedResources = Array.isArray(safeTab.resources) ? safeTab.resources : [];
+
+            nestedResources.forEach((resource, resourceIndex) => {
+                items.push(normalizeResource({ ...resource, tabId }, tabId, resourceIndex));
+            });
+
+            const legacyElements = Array.isArray(safeTab.elements) ? safeTab.elements : [];
+            legacyElements.forEach((element, elementIndex) => {
+                const safeElement = isPlainObject(element) ? element : {};
+                const legacy = legacyMap[safeElement.resourceId] ?? {};
+                items.push(normalizeResource(
+                    {
+                        id: safeElement.id ?? createId('res'),
+                        name: legacy.name ?? `Resource ${elementIndex + 1}`,
+                        type: legacy.type ?? 'text',
+                        tabId,
+                        position: { column: 0, order: elementIndex },
+                    },
+                    tabId,
+                    elementIndex
+                ));
+            });
         });
+
+        return items;
+    }
+
+    // Восстановление способностей из tabs.abilities, если корневой список ещё не существует.
+    function extractAbilitiesFromTabs(tabs) {
+        if (!Array.isArray(tabs)) {
+            return [];
+        }
+
+        const items = [];
+        tabs.forEach((tab, tabIndex) => {
+            const safeTab = isPlainObject(tab) ? tab : {};
+            const tabId = isNonEmptyString(safeTab.id) ? safeTab.id : `legacy-tab-${tabIndex + 1}`;
+            const nestedAbilities = Array.isArray(safeTab.abilities) ? safeTab.abilities : [];
+
+            nestedAbilities.forEach((ability, abilityIndex) => {
+                items.push(normalizeAbility({ ...ability, tabId }, tabId, abilityIndex));
+            });
+        });
+
+        return items;
+    }
+
+    // Восстановление формул из tabs.formulas, если корневой список ещё не существует.
+    function extractFormulasFromTabs(tabs) {
+        if (!Array.isArray(tabs)) {
+            return [];
+        }
+
+        const items = [];
+        tabs.forEach((tab, tabIndex) => {
+            const safeTab = isPlainObject(tab) ? tab : {};
+            const tabId = isNonEmptyString(safeTab.id) ? safeTab.id : `legacy-tab-${tabIndex + 1}`;
+            const nestedFormulas = Array.isArray(safeTab.formulas) ? safeTab.formulas : [];
+
+            nestedFormulas.forEach((formula, formulaIndex) => {
+                items.push(normalizeFormula({ ...formula, tabId }, tabId, formulaIndex));
+            });
+        });
+
+        return items;
     }
 
     // Нормализация шаблонов листов токена.
@@ -273,13 +392,76 @@ if (root) {
         return map;
     }
 
+    // Привязываем карточки к существующим вкладкам.
+    function ensureItemsUseKnownTabs(items, tabs, fallbackTabId) {
+        const knownTabIds = new Set(tabs.map((tab) => tab.id));
+
+        items.forEach((item, index) => {
+            if (!knownTabIds.has(item.tabId)) {
+                item.tabId = fallbackTabId;
+            }
+            item.column = item.column === 1 ? 1 : 0;
+            item.order = isNumeric(item.order) ? Number(item.order) : index;
+        });
+    }
+
+    // Формулы старого формата переносим на отдельную вкладку Formulas.
+    function ensureFormulaTabs(formulas, tabs) {
+        if (!Array.isArray(formulas) || formulas.length === 0) {
+            return;
+        }
+
+        const knownTabIds = new Set(tabs.map((tab) => tab.id));
+        let formulaTab = tabs.find((tab) => normalizeVariableName(tab.name) === 'formulas') ?? null;
+
+        formulas.forEach((formula, index) => {
+            if (!knownTabIds.has(formula.tabId)) {
+                if (!formulaTab) {
+                    formulaTab = createDefaultTab('Formulas', tabs.length);
+                    tabs.push(formulaTab);
+                    knownTabIds.add(formulaTab.id);
+                }
+                formula.tabId = formulaTab.id;
+            }
+
+            formula.column = formula.column === 1 ? 1 : 0;
+            formula.order = isNumeric(formula.order) ? Number(formula.order) : index;
+        });
+    }
+
+    // Пересчитываем порядок карточек внутри каждой колонки вкладки.
+    function reindexAllColumns(tabs, resources, abilities, formulas) {
+        tabs.forEach((tab) => {
+            [0, 1].forEach((column) => {
+                const entries = getColumnItemsForLists(tab.id, column, resources, abilities, formulas);
+                entries.forEach((entry, index) => {
+                    entry.item.order = index;
+                    entry.item.column = column;
+                });
+            });
+        });
+    }
+
+    function getColumnItemsForLists(tabId, column, resources, abilities, formulas) {
+        return [
+            ...resources
+                .filter((resource) => resource.tabId === tabId && resource.column === column)
+                .map((resource) => ({ kind: 'resource', item: resource })),
+            ...abilities
+                .filter((ability) => ability.tabId === tabId && ability.column === column)
+                .map((ability) => ({ kind: 'ability', item: ability })),
+            ...formulas
+                .filter((formula) => formula.tabId === tabId && formula.column === column)
+                .map((formula) => ({ kind: 'formula', item: formula })),
+        ].sort((left, right) => (left.item.order ?? 0) - (right.item.order ?? 0));
+    }
+
     // Создание вкладки по умолчанию.
     function createDefaultTab(name, order) {
         return {
             id: createId('tab'),
             name: name ?? 'Tab',
             order: Number.isInteger(order) ? order : 0,
-            resources: [],
         };
     }
 
@@ -296,8 +478,11 @@ if (root) {
     // Переключение активной вкладки с перерисовкой UI вкладок.
     function setActiveTab(tabId) {
         activeTabId = tabId;
+        validateFormulas();
         renderTabsBar();
         renderTabPanel();
+        updateValidationUI();
+        updatePreviewUI();
     }
 
     // Переключение активного шаблона листа.
@@ -312,10 +497,13 @@ if (root) {
             fields.settings.value = JSON.stringify(state.settings ?? {});
         }
         if (fields.resources) {
-            fields.resources.value = JSON.stringify(flattenResources(state.tabs));
+            fields.resources.value = JSON.stringify(state.resources ?? []);
+        }
+        if (fields.abilities) {
+            fields.abilities.value = JSON.stringify(state.abilities ?? []);
         }
         if (fields.tabs) {
-            fields.tabs.value = JSON.stringify(state.tabs ?? []);
+            fields.tabs.value = JSON.stringify(buildTabsPayload());
         }
         if (fields.formulas) {
             fields.formulas.value = JSON.stringify(state.formulas ?? []);
@@ -333,7 +521,6 @@ if (root) {
         validateFormulas();
         renderTabsBar();
         renderTabPanel();
-        renderFormulasPanel();
         renderSheetTemplatesPanel();
         updateValidationUI();
         updatePreviewUI();
@@ -379,7 +566,7 @@ if (root) {
         if (!tab) {
             const empty = document.createElement('div');
             empty.className = 'workshop-empty';
-            empty.textContent = 'Select a tab to edit its resources.';
+            empty.textContent = 'Select a tab to edit its cards.';
             panel.appendChild(empty);
             return;
         }
@@ -418,7 +605,6 @@ if (root) {
         const columnsWrapper = document.createElement('div');
         columnsWrapper.className = 'workshop-columns';
 
-        // Рисуем строго две колонки: A и B.
         [0, 1].forEach((column) => {
             const columnEl = document.createElement('div');
             columnEl.className = 'workshop-column';
@@ -433,65 +619,15 @@ if (root) {
             list.className = 'workshop-column-list';
             list.dataset.columnList = String(column);
 
-            const resources = getColumnResources(tab, column);
-            if (resources.length === 0) {
+            const items = getColumnItems(tab.id, column);
+            if (items.length === 0) {
                 const empty = document.createElement('div');
                 empty.className = 'workshop-empty';
-                empty.textContent = 'Drop resources here.';
+                empty.textContent = 'Drop cards here.';
                 list.appendChild(empty);
             } else {
-                resources.forEach((resource) => {
-                    const card = document.createElement('div');
-                    card.className = 'workshop-resource-card';
-                    card.dataset.resourceId = resource.id;
-                    card.dataset.tabId = tab.id;
-                    if (editable) {
-                        card.setAttribute('draggable', 'true');
-                    }
-
-                    const nameInput = document.createElement('input');
-                    nameInput.type = 'text';
-                    nameInput.value = resource.name;
-                    nameInput.dataset.field = 'resource-name';
-                    nameInput.dataset.resourceId = resource.id;
-                    nameInput.dataset.tabId = tab.id;
-                    if (!editable) {
-                        nameInput.disabled = true;
-                    }
-
-                    const typeSelect = document.createElement('select');
-                    typeSelect.dataset.field = 'resource-type';
-                    typeSelect.dataset.resourceId = resource.id;
-                    typeSelect.dataset.tabId = tab.id;
-                    if (!editable) {
-                        typeSelect.disabled = true;
-                    }
-
-                    ['text', 'number', 'boolean', 'select'].forEach((type) => {
-                        const option = document.createElement('option');
-                        option.value = type;
-                        option.textContent = type;
-                        if (resource.type === type) {
-                            option.selected = true;
-                        }
-                        typeSelect.appendChild(option);
-                    });
-
-                    card.appendChild(nameInput);
-                    card.appendChild(typeSelect);
-
-                    if (editable) {
-                        const removeBtn = document.createElement('button');
-                        removeBtn.type = 'button';
-                        removeBtn.className = 'workshop-inline-btn';
-                        removeBtn.dataset.action = 'remove-resource';
-                        removeBtn.dataset.resourceId = resource.id;
-                        removeBtn.dataset.tabId = tab.id;
-                        removeBtn.textContent = 'Remove';
-                        card.appendChild(removeBtn);
-                    }
-
-                    list.appendChild(card);
+                items.forEach((entry) => {
+                    list.appendChild(createColumnCard(entry, tab.id));
                 });
             }
 
@@ -501,6 +637,242 @@ if (root) {
         });
 
         panel.appendChild(columnsWrapper);
+    }
+
+    function createColumnCard(entry, tabId) {
+        const card = document.createElement('div');
+        card.className = `workshop-item-card is-${entry.kind}`;
+        card.dataset.itemKind = entry.kind;
+        card.dataset.itemId = entry.item.id;
+        card.dataset.tabId = tabId;
+        if (editable) {
+            card.setAttribute('draggable', 'true');
+        }
+
+        const badge = document.createElement('div');
+        badge.className = 'workshop-item-badge';
+        badge.textContent = entry.kind;
+        card.appendChild(badge);
+
+        if (entry.kind === 'resource') {
+            appendResourceCardFields(card, entry.item, tabId);
+        } else if (entry.kind === 'ability') {
+            appendAbilityCardFields(card, entry.item, tabId);
+        } else {
+            appendFormulaCardFields(card, entry.item);
+        }
+
+        return card;
+    }
+
+    function appendResourceCardFields(card, resource, tabId) {
+        const row = document.createElement('div');
+        row.className = 'workshop-item-row';
+
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.value = resource.name;
+        nameInput.dataset.field = 'resource-name';
+        nameInput.dataset.resourceId = resource.id;
+        nameInput.dataset.tabId = tabId;
+        if (!editable) {
+            nameInput.disabled = true;
+        }
+
+        const typeSelect = document.createElement('select');
+        typeSelect.dataset.field = 'resource-type';
+        typeSelect.dataset.resourceId = resource.id;
+        typeSelect.dataset.tabId = tabId;
+        if (!editable) {
+            typeSelect.disabled = true;
+        }
+
+        ['text', 'number', 'boolean', 'select'].forEach((type) => {
+            const option = document.createElement('option');
+            option.value = type;
+            option.textContent = type;
+            if (resource.type === type) {
+                option.selected = true;
+            }
+            typeSelect.appendChild(option);
+        });
+
+        row.appendChild(nameInput);
+        row.appendChild(typeSelect);
+
+        if (editable) {
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = 'workshop-inline-btn';
+            removeBtn.dataset.action = 'remove-resource';
+            removeBtn.dataset.resourceId = resource.id;
+            removeBtn.dataset.tabId = tabId;
+            removeBtn.textContent = 'Remove';
+            row.appendChild(removeBtn);
+        }
+
+        card.appendChild(row);
+    }
+
+    function appendAbilityCardFields(card, ability, tabId) {
+        const topRow = document.createElement('div');
+        topRow.className = 'workshop-item-row';
+
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.value = ability.name;
+        nameInput.dataset.field = 'ability-name';
+        nameInput.dataset.abilityId = ability.id;
+        nameInput.dataset.tabId = tabId;
+        nameInput.placeholder = 'Ability name';
+        if (!editable) {
+            nameInput.disabled = true;
+        }
+
+        const typeSelect = document.createElement('select');
+        typeSelect.dataset.field = 'ability-type';
+        typeSelect.dataset.abilityId = ability.id;
+        typeSelect.dataset.tabId = tabId;
+        if (!editable) {
+            typeSelect.disabled = true;
+        }
+
+        ['active', 'passive', 'special'].forEach((type) => {
+            const option = document.createElement('option');
+            option.value = type;
+            option.textContent = type;
+            if (ability.type === type) {
+                option.selected = true;
+            }
+            typeSelect.appendChild(option);
+        });
+
+        topRow.appendChild(nameInput);
+        topRow.appendChild(typeSelect);
+
+        if (editable) {
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = 'workshop-inline-btn';
+            removeBtn.dataset.action = 'remove-ability';
+            removeBtn.dataset.abilityId = ability.id;
+            removeBtn.dataset.tabId = tabId;
+            removeBtn.textContent = 'Remove';
+            topRow.appendChild(removeBtn);
+        }
+
+        card.appendChild(topRow);
+
+        const iconInput = document.createElement('input');
+        iconInput.type = 'text';
+        iconInput.value = ability.icon ?? '';
+        iconInput.dataset.field = 'ability-icon';
+        iconInput.dataset.abilityId = ability.id;
+        iconInput.dataset.tabId = tabId;
+        iconInput.placeholder = 'Icon URL or asset path';
+        if (!editable) {
+            iconInput.disabled = true;
+        }
+        card.appendChild(iconInput);
+
+        card.appendChild(createAbilityTextarea('Description', 'ability-description', ability.id, tabId, ability.description ?? ''));
+        card.appendChild(createAbilityTextarea('Unlock condition', 'ability-unlock-condition', ability.id, tabId, ability.unlock_condition ?? ''));
+        card.appendChild(createAbilityTextarea('Use condition', 'ability-use-condition', ability.id, tabId, ability.use_condition ?? ''));
+        card.appendChild(createAbilityTextarea('Trigger condition', 'ability-trigger-condition', ability.id, tabId, ability.trigger_condition ?? ''));
+        card.appendChild(createAbilityTextarea('Grants', 'ability-grants', ability.id, tabId, ability.grants ?? ''));
+    }
+
+    function createAbilityTextarea(label, field, abilityId, tabId, value) {
+        const wrap = document.createElement('label');
+        wrap.className = 'workshop-item-stack';
+
+        const text = document.createElement('span');
+        text.className = 'workshop-item-label';
+        text.textContent = label;
+
+        const textarea = document.createElement('textarea');
+        textarea.value = value;
+        textarea.dataset.field = field;
+        textarea.dataset.abilityId = abilityId;
+        textarea.dataset.tabId = tabId;
+        if (!editable) {
+            textarea.disabled = true;
+        }
+
+        wrap.appendChild(text);
+        wrap.appendChild(textarea);
+        return wrap;
+    }
+
+    function appendFormulaCardFields(card, formula) {
+        const row = document.createElement('div');
+        row.className = 'workshop-item-row';
+
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.value = formula.name;
+        nameInput.placeholder = 'Formula name';
+        nameInput.dataset.field = 'formula-name';
+        nameInput.dataset.formulaId = formula.id;
+        if (!editable) {
+            nameInput.disabled = true;
+        }
+
+        row.appendChild(nameInput);
+
+        if (editable) {
+            const previewBtn = document.createElement('button');
+            previewBtn.type = 'button';
+            previewBtn.className = 'workshop-inline-btn';
+            previewBtn.dataset.action = 'preview-formula';
+            previewBtn.dataset.formulaId = formula.id;
+            previewBtn.textContent = 'Preview';
+            row.appendChild(previewBtn);
+
+            const suggestBtn = document.createElement('button');
+            suggestBtn.type = 'button';
+            suggestBtn.className = 'workshop-inline-btn';
+            suggestBtn.dataset.action = 'open-autocomplete';
+            suggestBtn.dataset.formulaId = formula.id;
+            suggestBtn.textContent = 'Insert';
+            row.appendChild(suggestBtn);
+
+            const removeBtn = document.createElement('button');
+            removeBtn.type = 'button';
+            removeBtn.className = 'workshop-inline-btn';
+            removeBtn.dataset.action = 'remove-formula';
+            removeBtn.dataset.formulaId = formula.id;
+            removeBtn.textContent = 'Remove';
+            row.appendChild(removeBtn);
+        }
+
+        card.appendChild(row);
+
+        const expressionWrap = document.createElement('div');
+        expressionWrap.className = 'workshop-formula-expression';
+
+        const expressionInput = document.createElement('input');
+        expressionInput.type = 'text';
+        expressionInput.value = formula.expression;
+        expressionInput.placeholder = 'Expression, ex: (|agility|-10) / 2';
+        expressionInput.dataset.field = 'formula-expression';
+        expressionInput.dataset.formulaId = formula.id;
+        if (!editable) {
+            expressionInput.disabled = true;
+        }
+
+        const status = document.createElement('div');
+        status.className = 'workshop-formula-status';
+        status.dataset.formulaStatus = formula.id;
+
+        const preview = document.createElement('div');
+        preview.className = 'workshop-formula-preview';
+        preview.dataset.formulaPreview = formula.id;
+
+        expressionWrap.appendChild(expressionInput);
+        expressionWrap.appendChild(status);
+        expressionWrap.appendChild(preview);
+        card.appendChild(expressionWrap);
     }
 
     // Рендер списка формул, их полей и служебных кнопок.
@@ -961,93 +1333,118 @@ if (root) {
         });
     }
 
-    // Сериализация ресурсов вкладок в плоский список (совместимость с текущей моделью хранения).
-    function flattenResources(tabs) {
-        const list = [];
-        tabs.forEach((tab) => {
-            const resources = Array.isArray(tab.resources) ? tab.resources : [];
-            resources.forEach((resource) => {
-                list.push({
+    // Собираем tabs-представление из плоских коллекций для сохранения в документ.
+    function buildTabsPayload() {
+        return state.tabs.map((tab) => ({
+            id: tab.id,
+            name: tab.name,
+            order: tab.order ?? 0,
+            resources: state.resources
+                .filter((resource) => resource.tabId === tab.id)
+                .sort((left, right) => ((left.column ?? 0) - (right.column ?? 0)) || ((left.order ?? 0) - (right.order ?? 0)))
+                .map((resource) => ({
                     id: resource.id,
                     name: resource.name,
                     type: resource.type,
-                    tabId: tab.id,
-                    column: resource.position?.column ?? 0,
-                    order: resource.position?.order ?? 0,
-                });
-            });
-        });
-        return list;
+                    position: {
+                        column: resource.column ?? 0,
+                        order: resource.order ?? 0,
+                    },
+                })),
+            abilities: state.abilities
+                .filter((ability) => ability.tabId === tab.id)
+                .sort((left, right) => ((left.column ?? 0) - (right.column ?? 0)) || ((left.order ?? 0) - (right.order ?? 0)))
+                .map((ability) => ({
+                    id: ability.id,
+                    name: ability.name,
+                    type: ability.type,
+                    position: {
+                        column: ability.column ?? 0,
+                        order: ability.order ?? 0,
+                    },
+                })),
+            formulas: state.formulas
+                .filter((formula) => formula.tabId === tab.id)
+                .sort((left, right) => ((left.column ?? 0) - (right.column ?? 0)) || ((left.order ?? 0) - (right.order ?? 0)))
+                .map((formula) => ({
+                    id: formula.id,
+                    name: formula.name,
+                    expression: formula.expression,
+                    position: {
+                        column: formula.column ?? 0,
+                        order: formula.order ?? 0,
+                    },
+                })),
+        }));
     }
 
-    // Получение ресурсов конкретной колонки с сортировкой по order.
-    function getColumnResources(tab, column) {
-        return (tab.resources ?? [])
-            .filter((resource) => (resource.position?.column ?? 0) === column)
-            .sort((a, b) => (a.position?.order ?? 0) - (b.position?.order ?? 0));
+    // Карточки одной колонки собираются из всех поддерживаемых коллекций.
+    function getColumnItems(tabId, column) {
+        return getColumnItemsForLists(tabId, column, state.resources, state.abilities, state.formulas);
     }
 
-    // Удаление ресурса из вкладки по id.
-    function removeResourceFromTab(tab, resourceId) {
-        const index = tab.resources.findIndex((resource) => resource.id === resourceId);
+    function getCollectionByKind(kind) {
+        if (kind === 'resource') {
+            return state.resources;
+        }
+        if (kind === 'ability') {
+            return state.abilities;
+        }
+        return state.formulas;
+    }
+
+    function findItemByKind(kind, itemId) {
+        return getCollectionByKind(kind).find((item) => item.id === itemId) ?? null;
+    }
+
+    function removeItemByKind(kind, itemId) {
+        const collection = getCollectionByKind(kind);
+        const index = collection.findIndex((item) => item.id === itemId);
         if (index === -1) {
             return null;
         }
-        return tab.resources.splice(index, 1)[0];
+        return collection.splice(index, 1)[0];
     }
 
-    // Замена ресурсов одной колонки с сохранением ресурсов другой колонки.
-    function replaceColumnResources(tab, column, columnResources) {
-        const others = (tab.resources ?? []).filter((resource) => (resource.position?.column ?? 0) !== column);
-        tab.resources = others.concat(columnResources);
-    }
-
-    // Пересчёт order внутри одной колонки.
-    function reindexColumn(tab, column) {
-        const columnResources = getColumnResources(tab, column);
-        columnResources.forEach((resource, index) => {
-            resource.position = resource.position ?? {};
-            resource.position.column = column;
-            resource.position.order = index;
+    function reindexColumn(tabId, column) {
+        const entries = getColumnItems(tabId, column);
+        entries.forEach((entry, index) => {
+            entry.item.column = column;
+            entry.item.order = index;
         });
-        replaceColumnResources(tab, column, columnResources);
     }
 
-    // Перемещение ресурса между колонками/вкладками (drag-and-drop) с корректным order.
-    function moveResource({ fromTabId, resourceId, toTabId, toColumn, beforeResourceId }) {
-        const fromTab = state.tabs.find((tab) => tab.id === fromTabId);
-        const toTab = state.tabs.find((tab) => tab.id === toTabId);
-        if (!fromTab || !toTab) {
+    // Перемещение карточки любого типа между колонками/вкладками.
+    function moveItem({ kind, itemId, fromTabId, toTabId, toColumn, beforeItemId }) {
+        const item = findItemByKind(kind, itemId);
+        if (!item) {
             return;
         }
 
-        const resource = removeResourceFromTab(fromTab, resourceId);
-        if (!resource) {
-            return;
-        }
-
-        const fromColumn = resource.position?.column ?? 0;
+        const fromColumn = item.column ?? 0;
         const sameColumn = fromTabId === toTabId && fromColumn === toColumn;
+        const targetEntries = getColumnItems(toTabId, toColumn).filter((entry) => {
+            return !(entry.kind === kind && entry.item.id === itemId);
+        });
 
-        const targetColumnResources = getColumnResources(toTab, toColumn);
-        let insertIndex = beforeResourceId
-            ? targetColumnResources.findIndex((item) => item.id === beforeResourceId)
-            : targetColumnResources.length;
+        let insertIndex = beforeItemId
+            ? targetEntries.findIndex((entry) => entry.item.id === beforeItemId)
+            : targetEntries.length;
         if (insertIndex < 0) {
-            insertIndex = targetColumnResources.length;
+            insertIndex = targetEntries.length;
         }
 
-        resource.position = resource.position ?? {};
-        resource.position.column = toColumn;
-        targetColumnResources.splice(insertIndex, 0, resource);
-        targetColumnResources.forEach((item, index) => {
-            item.position.column = toColumn;
-            item.position.order = index;
+        item.tabId = toTabId;
+        item.column = toColumn;
+        targetEntries.splice(insertIndex, 0, { kind, item });
+        targetEntries.forEach((entry, index) => {
+            entry.item.tabId = toTabId;
+            entry.item.column = toColumn;
+            entry.item.order = index;
         });
-        replaceColumnResources(toTab, toColumn, targetColumnResources);
 
         if (!sameColumn) {
-            reindexColumn(fromTab, fromColumn);
+            reindexColumn(fromTabId, fromColumn);
         }
     }
 
@@ -1055,17 +1452,15 @@ if (root) {
     // Используется для автокомплита и валидации ссылок.
     function getAllResources() {
         const unique = new Map();
-        state.tabs.forEach((tab) => {
-            (tab.resources ?? []).forEach((resource) => {
-                const key = normalizeVariableName(resource.name);
-                if (!unique.has(key)) {
-                    unique.set(key, {
-                        name: resource.name,
-                        key,
-                        type: resource.type ?? 'text',
-                    });
-                }
-            });
+        state.resources.forEach((resource) => {
+            const key = normalizeVariableName(resource.name);
+            if (!unique.has(key)) {
+                unique.set(key, {
+                    name: resource.name,
+                    key,
+                    type: resource.type ?? 'text',
+                });
+            }
         });
         return [...unique.values()];
     }
@@ -1501,8 +1896,7 @@ if (root) {
         }
 
         if (field === 'resource-name') {
-            const tab = state.tabs.find((item) => item.id === event.target.dataset.tabId);
-            const resource = tab?.resources.find((item) => item.id === event.target.dataset.resourceId);
+            const resource = findItemByKind('resource', event.target.dataset.resourceId);
             if (resource) {
                 resource.name = event.target.value;
             }
@@ -1515,13 +1909,84 @@ if (root) {
         }
 
         if (field === 'resource-type') {
-            const tab = state.tabs.find((item) => item.id === event.target.dataset.tabId);
-            const resource = tab?.resources.find((item) => item.id === event.target.dataset.resourceId);
+            const resource = findItemByKind('resource', event.target.dataset.resourceId);
             if (resource) {
                 resource.type = event.target.value;
             }
             formulaPreviewById.clear();
             updatePreviewUI();
+            syncFields();
+            return;
+        }
+
+        if (field === 'ability-name') {
+            const ability = findItemByKind('ability', event.target.dataset.abilityId);
+            if (ability) {
+                ability.name = event.target.value;
+            }
+            syncFields();
+            return;
+        }
+
+        if (field === 'ability-type') {
+            const ability = findItemByKind('ability', event.target.dataset.abilityId);
+            if (ability) {
+                ability.type = ['active', 'passive', 'special'].includes(event.target.value) ? event.target.value : 'active';
+            }
+            syncFields();
+            return;
+        }
+
+        if (field === 'ability-icon') {
+            const ability = findItemByKind('ability', event.target.dataset.abilityId);
+            if (ability) {
+                ability.icon = event.target.value;
+            }
+            syncFields();
+            return;
+        }
+
+        if (field === 'ability-description') {
+            const ability = findItemByKind('ability', event.target.dataset.abilityId);
+            if (ability) {
+                ability.description = event.target.value;
+            }
+            syncFields();
+            return;
+        }
+
+        if (field === 'ability-unlock-condition') {
+            const ability = findItemByKind('ability', event.target.dataset.abilityId);
+            if (ability) {
+                ability.unlock_condition = event.target.value;
+            }
+            syncFields();
+            return;
+        }
+
+        if (field === 'ability-use-condition') {
+            const ability = findItemByKind('ability', event.target.dataset.abilityId);
+            if (ability) {
+                ability.use_condition = event.target.value;
+            }
+            syncFields();
+            return;
+        }
+
+        if (field === 'ability-trigger-condition') {
+            const ability = findItemByKind('ability', event.target.dataset.abilityId);
+            if (ability) {
+                ability.trigger_condition = event.target.value;
+            }
+            syncFields();
+            return;
+        }
+
+        if (field === 'ability-grants') {
+            const ability = findItemByKind('ability', event.target.dataset.abilityId);
+            if (ability) {
+                ability.grants = event.target.value;
+            }
             syncFields();
             return;
         }
@@ -1675,10 +2140,14 @@ if (root) {
                 return;
             }
             const tabId = actionEl.dataset.tabId;
+            state.resources = state.resources.filter((resource) => resource.tabId !== tabId);
+            state.abilities = state.abilities.filter((ability) => ability.tabId !== tabId);
+            state.formulas = state.formulas.filter((formula) => formula.tabId !== tabId);
             state.tabs = state.tabs.filter((tab) => tab.id !== tabId);
             if (activeTabId === tabId) {
                 activeTabId = state.tabs[0]?.id ?? null;
             }
+            formulaPreviewById.clear();
             render();
             return;
         }
@@ -1691,37 +2160,83 @@ if (root) {
             }
 
             const tab = getActiveTab() ?? state.tabs[0];
-            const column = getColumnResources(tab, 0).length <= getColumnResources(tab, 1).length ? 0 : 1;
-            const order = getColumnResources(tab, column).length;
-            tab.resources.push({
+            const column = getColumnItems(tab.id, 0).length <= getColumnItems(tab.id, 1).length ? 0 : 1;
+            const order = getColumnItems(tab.id, column).length;
+            state.resources.push({
                 id: createId('res'),
-                name: `Resource ${tab.resources.length + 1}`,
+                name: `Resource ${state.resources.length + 1}`,
                 type: 'text',
-                position: { column, order },
+                tabId: tab.id,
+                column,
+                order,
             });
             render();
             return;
         }
 
         if (action === 'remove-resource') {
-            const tabId = actionEl.dataset.tabId;
-            const resourceId = actionEl.dataset.resourceId;
-            const tab = state.tabs.find((item) => item.id === tabId);
-            if (tab) {
-                const removed = removeResourceFromTab(tab, resourceId);
-                if (removed) {
-                    reindexColumn(tab, removed.position?.column ?? 0);
-                }
+            const removed = removeItemByKind('resource', actionEl.dataset.resourceId);
+            if (removed) {
+                reindexColumn(removed.tabId, removed.column ?? 0);
+            }
+            render();
+            return;
+        }
+
+        if (action === 'add-ability') {
+            if (state.tabs.length === 0) {
+                const tab = createDefaultTab('Tab 1', 0);
+                state.tabs.push(tab);
+                activeTabId = tab.id;
+            }
+
+            const tab = getActiveTab() ?? state.tabs[0];
+            const column = getColumnItems(tab.id, 0).length <= getColumnItems(tab.id, 1).length ? 0 : 1;
+            const order = getColumnItems(tab.id, column).length;
+            state.abilities.push({
+                id: createId('ability'),
+                name: `Ability ${state.abilities.length + 1}`,
+                description: '',
+                unlock_condition: '',
+                use_condition: '',
+                trigger_condition: '',
+                type: 'active',
+                grants: '',
+                icon: '',
+                tabId: tab.id,
+                column,
+                order,
+            });
+            render();
+            return;
+        }
+
+        if (action === 'remove-ability') {
+            const removed = removeItemByKind('ability', actionEl.dataset.abilityId);
+            if (removed) {
+                reindexColumn(removed.tabId, removed.column ?? 0);
             }
             render();
             return;
         }
 
         if (action === 'add-formula') {
+            if (state.tabs.length === 0) {
+                const tab = createDefaultTab('Tab 1', 0);
+                state.tabs.push(tab);
+                activeTabId = tab.id;
+            }
+
+            const tab = getActiveTab() ?? state.tabs[0];
+            const column = getColumnItems(tab.id, 0).length <= getColumnItems(tab.id, 1).length ? 0 : 1;
+            const order = getColumnItems(tab.id, column).length;
             state.formulas.push({
                 id: createId('formula'),
                 name: `Formula ${state.formulas.length + 1}`,
                 expression: '',
+                tabId: tab.id,
+                column,
+                order,
             });
             formulaPreviewById.clear();
             render();
@@ -1729,9 +2244,11 @@ if (root) {
         }
 
         if (action === 'remove-formula') {
-            const formulaId = actionEl.dataset.formulaId;
-            state.formulas = state.formulas.filter((formula) => formula.id !== formulaId);
-            formulaPreviewById.delete(formulaId);
+            const removed = removeItemByKind('formula', actionEl.dataset.formulaId);
+            if (removed) {
+                formulaPreviewById.delete(removed.id);
+                reindexColumn(removed.tabId, removed.column ?? 0);
+            }
             render();
             return;
         }
@@ -1813,17 +2330,18 @@ if (root) {
         updateValidationUI();
     });
 
-    // События drag-and-drop для переноса ресурсов между колонками.
+    // События drag-and-drop для переноса карточек между колонками.
     root.addEventListener('dragstart', (event) => {
         if (!editable) {
             return;
         }
-        const card = event.target.closest('.workshop-resource-card');
+        const card = event.target.closest('.workshop-item-card');
         if (!card) {
             return;
         }
         dragState = {
-            resourceId: card.dataset.resourceId,
+            itemKind: card.dataset.itemKind,
+            itemId: card.dataset.itemId,
             tabId: card.dataset.tabId,
         };
         card.classList.add('is-dragging');
@@ -1833,7 +2351,7 @@ if (root) {
     });
 
     root.addEventListener('dragend', (event) => {
-        const card = event.target.closest('.workshop-resource-card');
+        const card = event.target.closest('.workshop-item-card');
         if (card) {
             card.classList.remove('is-dragging');
         }
@@ -1845,7 +2363,7 @@ if (root) {
             return;
         }
         const column = event.target.closest('[data-column]');
-        const card = event.target.closest('.workshop-resource-card');
+        const card = event.target.closest('.workshop-item-card');
         if (!column && !card) {
             return;
         }
@@ -1859,7 +2377,7 @@ if (root) {
         if (!editable || !dragState) {
             return;
         }
-        const card = event.target.closest('.workshop-resource-card');
+        const card = event.target.closest('.workshop-item-card');
         const columnEl = event.target.closest('[data-column]');
         if (!columnEl && !card) {
             return;
@@ -1871,13 +2389,17 @@ if (root) {
         if (!targetTabId) {
             return;
         }
+        if (card && card.dataset.itemId === dragState.itemId && card.dataset.itemKind === dragState.itemKind) {
+            return;
+        }
 
-        moveResource({
+        moveItem({
+            kind: dragState.itemKind,
             fromTabId: dragState.tabId,
-            resourceId: dragState.resourceId,
+            itemId: dragState.itemId,
             toTabId: targetTabId,
             toColumn: targetColumn,
-            beforeResourceId: card?.dataset.resourceId ?? null,
+            beforeItemId: card?.dataset.itemId ?? null,
         });
 
         render();

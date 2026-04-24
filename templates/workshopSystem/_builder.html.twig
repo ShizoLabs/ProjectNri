@@ -7,14 +7,23 @@
         {% if not isTemplatesOnly %}
             <button class="tool-btn" type="button" data-action="add-tab" {% if not isEditable %}disabled{% endif %}>Add tab</button>
             <button class="tool-btn" type="button" data-action="add-resource" {% if not isEditable %}disabled{% endif %}>Add resource</button>
+            <button class="tool-btn" type="button" data-action="add-ability" {% if not isEditable %}disabled{% endif %}>Add ability</button>
+            <button class="tool-btn" type="button" data-action="add-formula" {% if not isEditable %}disabled{% endif %}>Add formula</button>
         {% endif %}
+        {# data-action читает assets/workshopSystem.js: кнопки ничего не делают сами по себе,
+           они только объявляют, какое изменение нужно внести в state конструктора. #}
         <button class="tool-btn" type="button" data-action="add-sheet-template" {% if not isEditable %}disabled{% endif %}>Add sheet template</button>
+        {# Поле листа может ссылаться на существующий resource системы. #}
         <button class="tool-btn" type="button" data-action="add-sheet-resource-field" {% if not isEditable %}disabled{% endif %}>Add resource field</button>
+        {# Formula field привязывается к вычисляемой формуле и создаётся как read-only. #}
         <button class="tool-btn" type="button" data-action="add-sheet-formula-field" {% if not isEditable %}disabled{% endif %}>Add formula field</button>
+        {# Local field создаёт независимое поле шаблона листа:
+           оно не связано ни с resource, ни с formula, хранит собственный sourceKey/key
+           и подходит для значений уровня конкретного токена, например HP или Armor Class. #}
         <button class="tool-btn" type="button" data-action="add-sheet-local-field" {% if not isEditable %}disabled{% endif %}>Add local field</button>
         {% if not isTemplatesOnly %}
             <div class="workshop-panel-hint">
-                Drag resources between two columns to set their position.
+                Drag resources, abilities, and formulas between two columns to set their position.
             </div>
         {% endif %}
     </aside>
@@ -23,13 +32,6 @@
         {% if not isTemplatesOnly %}
             <div class="workshop-tabs-bar" data-tabs-bar></div>
             <div class="workshop-tab-panel" data-tab-panel></div>
-            <div class="workshop-formulas" data-formulas-section>
-                <div class="workshop-panel-title">Formulas</div>
-                <div class="workshop-formula-list" data-formulas-list></div>
-                {% if isEditable %}
-                    <button class="tool-btn" type="button" data-action="add-formula">Add formula</button>
-                {% endif %}
-            </div>
         {% endif %}
         <div class="workshop-sheet-templates" data-sheet-templates-section>
             <div class="workshop-panel-title">Sheet templates</div>
@@ -46,6 +48,9 @@
         {% endif %}
         {% if form.resources is defined %}
             {{ form_widget(form.resources, {'attr': {'data-workshop-field': 'resources'}}) }}
+        {% endif %}
+        {% if form.abilities is defined %}
+            {{ form_widget(form.abilities, {'attr': {'data-workshop-field': 'abilities'}}) }}
         {% endif %}
         {% if form.tabs is defined %}
             {{ form_widget(form.tabs, {'attr': {'data-workshop-field': 'tabs'}}) }}

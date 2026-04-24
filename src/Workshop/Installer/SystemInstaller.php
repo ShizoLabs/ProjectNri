@@ -44,35 +44,21 @@ class SystemInstaller
 
         $resolvedName = trim($name ?? $template->getName());
         $resolvedSlug = $this->normalizeSlug($slug ?? $template->getSlug());
-        $tabId = $this->createId('tab');
+        $mainTabId = $this->createId('tab');
 
-        $resources = $this->buildResources($template->getResources(), $tabId);
-        $formulas = $this->buildFormulas($template->getFormulas());
+        $resources = $this->buildResources($template->getResources(), $mainTabId);
+        $abilities = $this->buildAbilities($template->getAbilities(), $mainTabId);
+        $formulaTabId = count($template->getFormulas()) > 0 ? $this->createId('tab') : null;
+        $formulas = $this->buildFormulas($template->getFormulas(), $formulaTabId ?? $mainTabId);
         $sheetTemplates = $this->buildSheetTemplates($template->getSheetTemplates(), $resources, $formulas);
-        $tabResources = array_map(
-            static fn (array $resource): array => [
-                'id' => $resource['id'],
-                'name' => $resource['name'],
-                'type' => $resource['type'],
-                'position' => [
-                    'column' => $resource['column'],
-                    'order' => $resource['order'],
-                ],
-            ],
-            $resources
-        );
 
         $system
             ->setName($resolvedName !== '' ? $resolvedName : $template->getName())
             ->setSlug($resolvedSlug !== '' ? $resolvedSlug : $template->getSlug())
             ->setSettings([])
-            ->setTabs([[
-                'id' => $tabId,
-                'name' => 'Main',
-                'order' => 0,
-                'resources' => $tabResources,
-            ]])
+            ->setTabs($this->buildTabs($mainTabId, $resources, $abilities, $formulaTabId, $formulas))
             ->setResources($resources)
+            ->setAbilities($abilities)
             ->setFormulas($formulas)
             ->setSheetTemplates($sheetTemplates)
             ->setMeta([]);
@@ -124,6 +110,51 @@ class SystemInstaller
     }
 
     /**
+     * Нормализует способности шаблона в внутренний формат системы.
+     *
+     * Поддерживаемые ключи массива:
+     * - `name`/`key`
+     * - `description`
+     * - `unlock_condition`
+     * - `use_condition`
+     * - `trigger_condition`
+     * - `type` (`active` | `passive` | `special`)
+     * - `grants`
+     * - `icon`
+     */
+    private function buildAbilities(array $abilities, string $tabId): array
+    {
+        $normalized = [];
+
+        foreach ($abilities as $index => $ability) {
+            $safe = is_array($ability) ? $ability : [];
+            $name = is_string($ability)
+                ? $this->humanize($ability)
+                : (string) ($safe['name'] ?? $safe['key'] ?? sprintf('Ability %d', $index + 1));
+            $type = is_string($safe['type'] ?? null) && in_array($safe['type'], ['active', 'passive', 'special'], true)
+                ? $safe['type']
+                : 'active';
+
+            $normalized[] = [
+                'id' => $this->createId('ability'),
+                'name' => trim($name) !== '' ? trim($name) : sprintf('Ability %d', $index + 1),
+                'description' => is_string($safe['description'] ?? null) ? $safe['description'] : '',
+                'unlock_condition' => is_string($safe['unlock_condition'] ?? null) ? $safe['unlock_condition'] : '',
+                'use_condition' => is_string($safe['use_condition'] ?? null) ? $safe['use_condition'] : '',
+                'trigger_condition' => is_string($safe['trigger_condition'] ?? null) ? $safe['trigger_condition'] : '',
+                'type' => $type,
+                'grants' => is_string($safe['grants'] ?? null) ? $safe['grants'] : '',
+                'icon' => is_string($safe['icon'] ?? null) ? $safe['icon'] : '',
+                'tabId' => $tabId,
+                'column' => 0,
+                'order' => $index,
+            ];
+        }
+
+        return $normalized;
+    }
+
+    /**
      * Нормализует формулы шаблона в внутренний формат системы.
      *
      * Ожидаемый входной элемент:
@@ -132,7 +163,7 @@ class SystemInstaller
      * Если элемент не массив, он пропускается.
      * Если имя пустое, формируется дефолт `Formula N`.
      */
-    private function buildFormulas(array $formulas): array
+    private function buildFormulas(array $formulas, string $tabId): array
     {
         $normalized = [];
 
@@ -148,10 +179,113 @@ class SystemInstaller
                 'id' => $this->createId('formula'),
                 'name' => trim($name) !== '' ? trim($name) : sprintf('Formula %d', $index + 1),
                 'expression' => $expression,
+                'tabId' => $tabId,
+                'column' => 0,
+                'order' => $index,
             ];
         }
 
         return $normalized;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $resources
+     * @param array<int, array<string, mixed>> $abilities
+     * @param array<int, array<string, mixed>> $formulas
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildTabs(
+        string $mainTabId,
+        array $resources,
+        array $abilities,
+        ?string $formulaTabId,
+        array $formulas
+    ): array {
+        $tabs = [[
+            'id' => $mainTabId,
+            'name' => 'Main',
+            'order' => 0,
+            'resources' => $this->buildTabResources($resources),
+            'abilities' => $this->buildTabAbilities($abilities),
+            'formulas' => [],
+        ]];
+
+        if ($formulaTabId !== null) {
+            $tabs[] = [
+                'id' => $formulaTabId,
+                'name' => 'Formulas',
+                'order' => 1,
+                'resources' => [],
+                'abilities' => [],
+                'formulas' => $this->buildTabFormulas($formulas),
+            ];
+        }
+
+        return $tabs;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $resources
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildTabResources(array $resources): array
+    {
+        return array_map(
+            static fn (array $resource): array => [
+                'id' => $resource['id'],
+                'name' => $resource['name'],
+                'type' => $resource['type'],
+                'position' => [
+                    'column' => $resource['column'],
+                    'order' => $resource['order'],
+                ],
+            ],
+            $resources
+        );
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $abilities
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildTabAbilities(array $abilities): array
+    {
+        return array_map(
+            static fn (array $ability): array => [
+                'id' => $ability['id'],
+                'name' => $ability['name'],
+                'type' => $ability['type'],
+                'position' => [
+                    'column' => $ability['column'],
+                    'order' => $ability['order'],
+                ],
+            ],
+            $abilities
+        );
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $formulas
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildTabFormulas(array $formulas): array
+    {
+        return array_map(
+            static fn (array $formula): array => [
+                'id' => $formula['id'],
+                'name' => $formula['name'],
+                'expression' => $formula['expression'],
+                'position' => [
+                    'column' => $formula['column'],
+                    'order' => $formula['order'],
+                ],
+            ],
+            $formulas
+        );
     }
 
     /**

@@ -9,6 +9,11 @@ abstract class AbstractSystemTemplate implements SystemTemplateInterface
         return [];
     }
 
+    public function getAbilities(): array
+    {
+        return [];
+    }
+
     public function getFormulas(): array
     {
         return [];

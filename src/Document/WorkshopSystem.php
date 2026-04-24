@@ -27,6 +27,9 @@ class WorkshopSystem
     private array $resources = [];
 
     #[ODM\Field(type: 'collection')]
+    private array $abilities = [];
+
+    #[ODM\Field(type: 'collection')]
     private array $tabs = [];
 
     #[ODM\Field(type: 'collection')]
@@ -91,6 +94,11 @@ class WorkshopSystem
         return $this->tabs;
     }
 
+    public function getAbilities(): array
+    {
+        return $this->abilities;
+    }
+
     public function getFormulas(): array
     {
         return $this->formulas;
@@ -151,6 +159,13 @@ class WorkshopSystem
         return $this;
     }
 
+    public function setAbilities(array $abilities): self
+    {
+        $this->abilities = $abilities;
+
+        return $this;
+    }
+
     public function setTabs(array $tabs): self
     {
         $this->tabs = $tabs;
@@ -190,6 +205,8 @@ class WorkshopSystem
             'name' => 'Tab 1',
             'order' => 0,
             'resources' => [],
+            'abilities' => [],
+            'formulas' => [],
         ]];
     }
 
@@ -226,102 +243,203 @@ class WorkshopSystem
                 $errors[] = sprintf('Tab #%d requires a name.', $index + 1);
             }
 
-            if (isset($tab['resources']) && !is_array($tab['resources'])) {
-                $errors[] = sprintf('Tab #%d resources must be a list.', $index + 1);
+            foreach (['resources', 'abilities', 'formulas'] as $field) {
+                if (isset($tab[$field]) && !is_array($tab[$field])) {
+                    $errors[] = sprintf('Tab #%d %s must be a list.', $index + 1, $field);
+                }
+            }
+
+            $errors = array_merge(
+                $errors,
+                $this->validateTabItems(
+                    is_array($tab['resources'] ?? null) ? $tab['resources'] : [],
+                    $index + 1,
+                    'resource',
+                    true
+                ),
+                $this->validateTabItems(
+                    is_array($tab['abilities'] ?? null) ? $tab['abilities'] : [],
+                    $index + 1,
+                    'ability',
+                    true,
+                    false,
+                    ['active', 'passive', 'special']
+                ),
+                $this->validateTabItems(
+                    is_array($tab['formulas'] ?? null) ? $tab['formulas'] : [],
+                    $index + 1,
+                    'formula',
+                    false,
+                    true
+                )
+            );
+        }
+
+        $errors = array_merge(
+            $errors,
+            $this->validatePlacedItems($this->resources, 'Resource', $tabIds, true),
+            $this->validatePlacedItems(
+                $this->abilities,
+                'Ability',
+                $tabIds,
+                true,
+                false,
+                ['active', 'passive', 'special'],
+                ['description', 'unlock_condition', 'use_condition', 'trigger_condition', 'grants', 'icon']
+            ),
+            $this->validatePlacedItems($this->formulas, 'Formula', $tabIds, false, true)
+        );
+
+        $errors = array_merge($errors, $this->validateSheetTemplates());
+
+        return $errors;
+    }
+
+    /**
+     * @param array<int, mixed> $items
+     * @param array<int, string> $allowedTypes
+     *
+     * @return array<int, string>
+     */
+    private function validateTabItems(
+        array $items,
+        int $tabNumber,
+        string $itemLabel,
+        bool $requiresType,
+        bool $requiresExpression = false,
+        array $allowedTypes = []
+    ): array {
+        $errors = [];
+
+        foreach ($items as $itemIndex => $item) {
+            $context = sprintf('Tab #%d %s #%d', $tabNumber, $itemLabel, $itemIndex + 1);
+            $errors = array_merge(
+                $errors,
+                $this->validatePositionedItem($item, $context, $requiresType, $requiresExpression, $allowedTypes, [], true)
+            );
+        }
+
+        return $errors;
+    }
+
+    /**
+     * @param array<int, mixed> $items
+     * @param array<int, string> $tabIds
+     * @param array<int, string> $allowedTypes
+     * @param array<int, string> $stringFields
+     *
+     * @return array<int, string>
+     */
+    private function validatePlacedItems(
+        array $items,
+        string $label,
+        array $tabIds,
+        bool $requiresType,
+        bool $requiresExpression = false,
+        array $allowedTypes = [],
+        array $stringFields = []
+    ): array {
+        $errors = [];
+
+        foreach ($items as $index => $item) {
+            $context = sprintf('%s #%d', $label, $index + 1);
+            $errors = array_merge(
+                $errors,
+                $this->validatePositionedItem($item, $context, $requiresType, $requiresExpression, $allowedTypes, $stringFields)
+            );
+
+            if (!is_array($item)) {
                 continue;
             }
 
-            foreach (($tab['resources'] ?? []) as $resourceIndex => $resource) {
-                if (!is_array($resource)) {
-                    $errors[] = sprintf('Tab #%d resource #%d must be an object.', $index + 1, $resourceIndex + 1);
-                    continue;
-                }
+            if (!$this->isNonEmptyString($item['tabId'] ?? null)) {
+                $errors[] = sprintf('%s requires a tab id.', $context);
+            } elseif (!empty($tabIds) && !in_array((string) $item['tabId'], $tabIds, true)) {
+                $errors[] = sprintf('%s references an unknown tab.', $context);
+            }
 
-                if (!$this->isNonEmptyString($resource['id'] ?? null)) {
-                    $errors[] = sprintf('Tab #%d resource #%d requires an id.', $index + 1, $resourceIndex + 1);
-                }
+            $column = $item['column'] ?? null;
+            if (!is_int($column) && !is_numeric($column)) {
+                $errors[] = sprintf('%s column must be numeric.', $context);
+            } elseif ((int) $column < 0 || (int) $column > 1) {
+                $errors[] = sprintf('%s column must be 0 or 1.', $context);
+            }
 
-                if (!$this->isNonEmptyString($resource['name'] ?? null)) {
-                    $errors[] = sprintf('Tab #%d resource #%d requires a name.', $index + 1, $resourceIndex + 1);
-                }
+            $order = $item['order'] ?? null;
+            if (!is_int($order) && !is_numeric($order)) {
+                $errors[] = sprintf('%s order must be numeric.', $context);
+            }
+        }
 
-                if (!$this->isNonEmptyString($resource['type'] ?? null)) {
-                    $errors[] = sprintf('Tab #%d resource #%d requires a type.', $index + 1, $resourceIndex + 1);
-                }
+        return $errors;
+    }
 
-                $position = $resource['position'] ?? null;
-                if (!is_array($position)) {
-                    $errors[] = sprintf('Tab #%d resource #%d requires a position.', $index + 1, $resourceIndex + 1);
-                    continue;
-                }
+    /**
+     * @param array<int, string> $allowedTypes
+     * @param array<int, string> $stringFields
+     *
+     * @return array<int, string>
+     */
+    private function validatePositionedItem(
+        mixed $item,
+        string $context,
+        bool $requiresType,
+        bool $requiresExpression = false,
+        array $allowedTypes = [],
+        array $stringFields = [],
+        bool $requiresPosition = false
+    ): array {
+        $errors = [];
 
+        if (!is_array($item)) {
+            return [sprintf('%s must be an object.', $context)];
+        }
+
+        if (!$this->isNonEmptyString($item['id'] ?? null)) {
+            $errors[] = sprintf('%s requires an id.', $context);
+        }
+
+        if (!$this->isNonEmptyString($item['name'] ?? null)) {
+            $errors[] = sprintf('%s requires a name.', $context);
+        }
+
+        if ($requiresType) {
+            $type = $item['type'] ?? null;
+            if (!$this->isNonEmptyString($type)) {
+                $errors[] = sprintf('%s requires a type.', $context);
+            } elseif ($allowedTypes !== [] && !in_array((string) $type, $allowedTypes, true)) {
+                $errors[] = sprintf('%s type must be one of: %s.', $context, implode(', ', $allowedTypes));
+            }
+        }
+
+        if ($requiresExpression && isset($item['expression']) && !is_string($item['expression'])) {
+            $errors[] = sprintf('%s expression must be a string.', $context);
+        }
+
+        foreach ($stringFields as $field) {
+            if (isset($item[$field]) && !is_string($item[$field])) {
+                $errors[] = sprintf('%s %s must be a string.', $context, str_replace('_', ' ', $field));
+            }
+        }
+
+        if ($requiresPosition || array_key_exists('position', $item)) {
+            $position = $item['position'] ?? null;
+            if (!is_array($position)) {
+                $errors[] = sprintf('%s requires a position.', $context);
+            } else {
                 $column = $position['column'] ?? null;
                 if (!is_int($column) && !is_numeric($column)) {
-                    $errors[] = sprintf('Tab #%d resource #%d position column must be numeric.', $index + 1, $resourceIndex + 1);
+                    $errors[] = sprintf('%s position column must be numeric.', $context);
                 } elseif ((int) $column < 0 || (int) $column > 1) {
-                    $errors[] = sprintf('Tab #%d resource #%d position column must be 0 or 1.', $index + 1, $resourceIndex + 1);
+                    $errors[] = sprintf('%s position column must be 0 or 1.', $context);
                 }
 
                 $order = $position['order'] ?? null;
                 if (!is_int($order) && !is_numeric($order)) {
-                    $errors[] = sprintf('Tab #%d resource #%d position order must be numeric.', $index + 1, $resourceIndex + 1);
+                    $errors[] = sprintf('%s position order must be numeric.', $context);
                 }
             }
         }
-
-        foreach ($this->resources as $index => $resource) {
-            if (!is_array($resource)) {
-                $errors[] = sprintf('Resource #%d must be an object.', $index + 1);
-                continue;
-            }
-
-            if (!$this->isNonEmptyString($resource['name'] ?? null)) {
-                $errors[] = sprintf('Resource #%d requires a name.', $index + 1);
-            }
-
-            if (!$this->isNonEmptyString($resource['type'] ?? null)) {
-                $errors[] = sprintf('Resource #%d requires a type.', $index + 1);
-            }
-
-            if (!$this->isNonEmptyString($resource['tabId'] ?? null)) {
-                $errors[] = sprintf('Resource #%d requires a tab id.', $index + 1);
-            } elseif (!empty($tabIds) && !in_array($resource['tabId'], $tabIds, true)) {
-                $errors[] = sprintf('Resource #%d references an unknown tab.', $index + 1);
-            }
-
-            $column = $resource['column'] ?? null;
-            if (!is_int($column) && !is_numeric($column)) {
-                $errors[] = sprintf('Resource #%d column must be numeric.', $index + 1);
-            } elseif ((int) $column < 0 || (int) $column > 1) {
-                $errors[] = sprintf('Resource #%d column must be 0 or 1.', $index + 1);
-            }
-
-            $order = $resource['order'] ?? null;
-            if (!is_int($order) && !is_numeric($order)) {
-                $errors[] = sprintf('Resource #%d order must be numeric.', $index + 1);
-            }
-        }
-
-        foreach ($this->formulas as $index => $formula) {
-            if (!is_array($formula)) {
-                $errors[] = sprintf('Formula #%d must be an object.', $index + 1);
-                continue;
-            }
-
-            if (!$this->isNonEmptyString($formula['id'] ?? null)) {
-                $errors[] = sprintf('Formula #%d requires an id.', $index + 1);
-            }
-
-            if (!$this->isNonEmptyString($formula['name'] ?? null)) {
-                $errors[] = sprintf('Formula #%d requires a name.', $index + 1);
-            }
-
-            if (isset($formula['expression']) && !is_string($formula['expression'])) {
-                $errors[] = sprintf('Formula #%d expression must be a string.', $index + 1);
-            }
-        }
-
-        $errors = array_merge($errors, $this->validateSheetTemplates());
 
         return $errors;
     }
